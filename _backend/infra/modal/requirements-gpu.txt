@@ -1,0 +1,4 @@
+# Linux GPU container only; do not install this into the Windows deployment venv.
+--extra-index-url https://download.pytorch.org/whl/cu129
+torch==2.13.0+cu129
+https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl#sha256=22e8d8fec755986b3ad964004a1f8c65a55626ec948354bdbe95993e6b0289fe

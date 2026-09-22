@@ -1,0 +1,92 @@
+<header class="en-nav"><a aria-label="Enclave home" class="brand" href="/"><span>Enclave</span></a><nav aria-label="Main navigation"><a href="/technology/">TECHNOLOGY</a><a href="/#services">PROTOCOL</a><a href="/architecture/">ARCHITECTURE</a><a href="/insights/">INSIGHTS</a><a href="/#roadmap">ROADMAP</a></nav><a class="nav-dashboard" href="/dashboard/">Dashboard</a><button aria-expanded="false" aria-label="Open menu" class="menu-toggle">☰</button></header>
+<main class="dashboard-main"><div class="en-container">
+  <div class="dash-heading"><div><span class="eyebrow">/THE CONFIDENTIAL WORKSPACE</span><h1>Your private intelligence layer.</h1></div><div class="dash-heading-right"><span class="preview-tag" id="environment-badge">NOT CONNECTED</span><p id="environment-description">Connect your gateway to run requests,<br>inspect receipts and manage agent mandates.</p></div></div>
+  <section class="panel connection-panel" id="connection-panel" aria-label="Gateway connection">
+    <form id="connection-form">
+      <label>Gateway URL<input id="gateway-url" value="/api" placeholder="https://gateway.example.com" required autocomplete="url"></label>
+      <label>Workspace API key<input id="api-key" type="password" placeholder="Your Enclave API key" required autocomplete="off" spellcheck="false"></label>
+      <button class="en-button" id="connect-gateway"><span>Connect workspace</span><b>↗</b></button>
+    </form>
+    <div class="connection-details"><span class="connection-status" id="connection-status" data-connected="false">Disconnected</span><p class="field-note" id="connection-note">Your API key stays in this tab. Provider credentials stay on the server.</p></div>
+    <button class="text-link plain-button" id="disconnect-gateway" hidden>Disconnect ↗</button>
+    <p class="form-error" id="connection-error" role="alert"></p>
+  </section>
+  <div aria-label="Workspace views" class="dash-nav" role="tablist">
+    <button aria-label="Inference" aria-selected="true" data-view="inference" role="tab">Inference</button><button aria-label="Receipts" data-view="receipts" role="tab">Receipts <span id="receipt-count">0</span></button><button aria-label="Models" data-view="models" role="tab">Models</button><button aria-label="Agent mandates" data-view="agents" role="tab">Agent mandates</button><button aria-label="USDC usage" data-view="payments" role="tab">USDC usage</button><button aria-label="Audit controls" data-view="compliance" role="tab">Audit controls</button>
+  </div>
+  <section aria-label="Inference" class="dash-view" id="view-inference" role="tabpanel">
+    <div class="inference-grid"><div class="panel inference-panel">
+      <div class="panel-title"><span class="eyebrow">/01 REQUEST</span><span class="small-tag" id="request-environment">GATEWAY</span></div><h2>Start with a private prompt.</h2>
+      <form id="inference-form">
+        <div class="form-grid"><label>Serving model<select id="model-select" disabled><option>Connect a gateway</option></select></label><label>Execution mode<select id="execution-mode"><option value="direct">Direct API request</option><option value="agent">Agent mandate</option></select></label></div>
+        <div hidden id="agent-choice"><label>Agent mandate<select id="inference-agent"></select></label></div>
+        <label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Ask a question to run an encrypted request…" required rows="6"></textarea>
+        <div class="prompt-examples"><button data-prompt="In three short sentences, explain what a signed inference receipt proves and what it does not prove." type="button">Receipts</button><button data-prompt="Explain the difference between a confidential GPU and a software development gateway in three short sentences." type="button">Trust boundaries</button><button data-prompt="Explain how a daily spending mandate limits AI agent payments in three short sentences." type="button">Agent commerce</button></div>
+        <div class="request-settings"><span class="field-note">AES-256-GCM encrypted request</span><span id="prompt-count">0 / 4,000</span></div>
+        <p class="field-note" id="request-note">Connect to see the active model and execution environment.</p>
+        <p class="form-error" id="inference-error" role="alert"></p><button class="en-button" id="run-inference" data-requires-connection disabled><span>Run inference</span><b>↗</b></button>
+      </form>
+      <div id="inference-recovery" hidden role="status">
+        <p class="field-note">The request may already be paid. Retry the same encrypted request and payment instead of creating a new one. Nothing is retried automatically.</p>
+        <p class="field-note" id="recovery-payment"></p>
+        <div class="dialog-actions"><button class="en-button" id="retry-inference" type="button"><span>Retry same request</span><b>↻</b></button><button class="text-link plain-button" id="dismiss-recovery" type="button">Dismiss recovery</button></div>
+        <p class="field-note">Before dismissing recovery or starting another request, check payment history. Dismissal does not cancel, refund or reverse an earlier payment or inference.</p>
+      </div>
+    </div>
+    <div class="inference-side">
+      <div class="panel attestation-panel"><span class="eyebrow">/02 EXECUTION CHECKS</span><h3>Verify every step.</h3>
+        <ol class="execution-steps">
+          <li data-step="0"><span>01</span><div><b>Gateway session</b><small id="session-trust-note">Attestation policy and session key</small></div><i>Waiting</i></li>
+          <li data-step="1"><span>02</span><div><b>Payment authorization</b><small>Explicit confirmation before settlement</small></div><i>Waiting</i></li>
+          <li data-step="2"><span>03</span><div><b>Encrypted inference</b><small id="provider-trust-note">Response from the configured provider</small></div><i>Waiting</i></li>
+          <li data-step="3"><span>04</span><div><b>Signed receipt</b><small>Input, output and EIP-712 signature</small></div><i>Waiting</i></li>
+        </ol>
+      </div>
+      <div class="panel output-panel"><div class="panel-title"><span class="eyebrow">/03 RESPONSE</span><span id="output-status">Ready when you are</span></div><div aria-live="polite" id="inference-output">The decrypted model response will appear here. Prompts and response text are not saved by this browser.</div><button class="text-link plain-button" hidden id="open-last-receipt">Inspect receipt ↗</button></div>
+    </div></div>
+  </section>
+  <section aria-label="Receipts" class="dash-view" hidden id="view-receipts" role="tabpanel">
+    <div class="section-heading"><div><span class="eyebrow">/PROVENANCE</span><h2>A record for every response.</h2></div><div class="refresh-row"><button class="text-link plain-button" data-refresh>Refresh ↻</button><button class="en-button secondary" id="export-receipts" data-requires-connection disabled><span>Export receipts</span><b>↓</b></button></div></div>
+    <div class="table-toolbar"><label class="search-label">Search loaded receipts<input id="receipt-search" placeholder="Receipt ID, model or hash"></label><span class="field-note receipt-filter-note">Signed records from your gateway. Signature verification is distinct from hardware verification.</span></div>
+    <div class="table-wrap"><table><thead><tr><th>RECEIPT</th><th>MODEL</th><th>CREATED</th><th>STATUS</th><th></th></tr></thead><tbody id="receipt-rows"></tbody></table></div>
+    <div class="empty-state" id="receipts-empty"><h3>Your first receipt starts with a request.</h3><p>Connect your workspace, then run an inference.</p><button class="en-button" data-goto="inference"><span>Open inference</span><b>↗</b></button></div>
+    <button class="text-link plain-button" id="load-more-receipts" hidden>Load older receipts ↓</button>
+  </section>
+  <section aria-label="Models" class="dash-view" hidden id="view-models" role="tabpanel">
+    <div class="section-heading"><div><span class="eyebrow">/MODEL REGISTRY</span><h2>Measured. Versioned. Approved.</h2></div><span class="small-tag" id="registry-status">NOT CONNECTED</span></div>
+    <p class="section-intro">Approved model records from the backend registry. The gateway configuration determines which model serves requests.</p><div class="model-grid" id="model-cards"><p class="workspace-empty">Connect a gateway to load its registry.</p></div>
+    <div class="panel registry-policy"><h3>Approval follows policy.</h3><p id="registry-policy-note">Model and serving code hashes identify the approved configuration. Remote hardware evidence is checked separately by the configured provider verifier.</p><a class="text-link" href="/architecture/#registry">Read the registry architecture ↗</a></div>
+  </section>
+  <section aria-label="Agent mandates" class="dash-view" hidden id="view-agents" role="tabpanel">
+    <div class="section-heading"><div><span class="eyebrow">/AGENT MANDATES</span><h2>A mandate for every action.</h2></div><button class="en-button" id="new-agent" data-requires-connection disabled><span>Create agent</span><b>+</b></button></div>
+    <p class="section-intro">Create a persistent agent with an allowed model and a daily spending limit. Select its mandate when sending an inference request.</p><p class="field-note warning">Agent keys and state are currently held by the software gateway. Hardware wallet custody is not enabled.</p>
+    <div class="agent-grid" id="agent-cards"><p class="workspace-empty">Connect your workspace to load agent mandates.</p></div>
+    <button class="text-link plain-button" id="load-more-agents" hidden>Load older agents ↓</button>
+  </section>
+  <section aria-label="USDC usage" class="dash-view" hidden id="view-payments" role="tabpanel">
+    <div class="section-heading"><div><span class="eyebrow">/USDC ACCOUNTING</span><h2>Pay per call. Stay in control.</h2></div><button class="en-button secondary" id="export-usage" data-requires-connection disabled><span>Export usage</span><b>↓</b></button></div>
+    <div class="payment-summary"><div class="panel"><span class="eyebrow">RECORDED USAGE</span><h3 id="payment-total">0.000000 USDC</h3><p>Completed calls recorded by the backend. Pending payments appear separately below.</p></div><div class="panel"><span class="eyebrow">SETTLEMENT NETWORK</span><h3 id="payment-network">Not connected</h3><p id="payment-description">Connect to inspect the payment mode and chain.</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>PAYMENT</th><th>MODE</th><th>USDC AMOUNT</th><th>SETTLEMENT</th></tr></thead><tbody id="usage-rows"><tr><td colspan="4">No payment history loaded.</td></tr></tbody></table></div>
+    <button class="text-link plain-button" id="load-more-payments" hidden>Load older payments ↓</button>
+  </section>
+  <section aria-label="Audit controls" class="dash-view" hidden id="view-compliance" role="tabpanel">
+    <div class="section-heading"><div><span class="eyebrow">/SELECTIVE DISCLOSURE</span><h2>Audit without opening the prompt.</h2></div><a class="en-button secondary" href="/legal/risk-disclosure/"><span>Trust boundaries</span><b>↗</b></a></div>
+    <div class="compliance-grid"><div class="panel"><h3>Export workspace records.</h3><p>Download loaded receipt and payment metadata. Exports contain no prompt, response text or session keys.</p>
+      <form id="audit-form"><label>Export contents<select id="audit-scope"><option value="receipts">Receipt hashes and metadata</option><option value="payments">Payment accounting records</option><option value="combined">Receipts and payment records</option></select></label><label>Purpose<input id="audit-purpose" maxlength="80" placeholder="e.g. Internal protocol review" required></label><label class="check-label"><input id="include-amounts" type="checkbox">Include payment amounts</label><button class="en-button" data-requires-connection disabled><span>Download audit export</span><b>↓</b></button></form>
+      <p class="field-note">Export filters apply to this file. They do not create or restrict an auditor credential.</p>
+    </div><div class="panel"><span class="eyebrow">/MEASUREMENT POLICY</span><h3>Versioned trust.</h3><dl class="policy-details" id="policy-details"><dt>Gateway</dt><dd>Not connected</dd></dl><button class="en-button secondary" id="issue-view-key" data-requires-connection disabled><span>Create auditor view key</span><b>↗</b></button><p class="field-note">A view key grants read access to all receipt and payment records for this workspace. Keep it private.</p></div></div>
+  </section>
+  <div aria-label="Execution topology" class="compute-topology"><div class="topology-caption"><span class="eyebrow">EXECUTION FABRIC</span><span id="topology-status">NOT CONNECTED</span></div><div class="topology-path">
+    <div class="topology-node"><span aria-hidden="true" class="node-glyph">01</span><div><b>Browser encryption</b><small>AES-256-GCM input and output</small></div></div><span class="topology-wire"></span>
+    <div class="topology-node enclave-node"><span aria-hidden="true" class="node-glyph">02</span><div><b id="topology-provider">Configured provider</b><small id="topology-boundary">Gateway trust shown above</small></div></div><span class="topology-wire"></span>
+    <div class="topology-node"><span aria-hidden="true" class="node-glyph">03</span><div><b>Receipt ledger</b><small>Signed, persisted and anchored</small></div></div>
+  </div><div class="topology-caption topology-bottom"><span id="topology-policy">POLICY / DISCONNECTED</span><span id="topology-chain">USDC · x402</span></div></div>
+  <div class="dash-metrics"><div><span>COMPLETED CALLS</span><strong id="metric-calls">0</strong></div><div><span>RECORDED USDC USAGE</span><strong id="metric-usage">0.000000</strong></div><div><span>RECEIPTS LOADED</span><strong id="metric-receipts">0</strong></div><div><span>EXECUTION ENVIRONMENT</span><strong class="metric-text" id="metric-environment">Not connected</strong></div></div>
+  <div class="dash-footnote"><span>ENCLAVE / PRIVATE IN. PROVABLE OUT.</span><span id="workspace-updated">History is stored by your gateway.</span></div>
+</div></main>
+<dialog class="en-dialog receipt-dialog" id="receipt-dialog"><form method="dialog"><button aria-label="Close receipt" class="dialog-close">×</button></form><span class="eyebrow">/INFERENCE RECEIPT</span><h2>Inspect provenance.</h2><p class="receipt-notice" id="receipt-notice">Signed execution record.</p><dl id="receipt-fields"></dl><p id="receipt-integrity" role="status"></p><div class="dialog-actions"><button class="en-button" id="verify-receipt"><span>Verify signature</span><b>✓</b></button><button class="en-button secondary" id="download-receipt"><span>Download JSON</span><b>↓</b></button></div></dialog>
+<dialog class="en-dialog" id="agent-dialog"><form method="dialog"><button aria-label="Close agent form" class="dialog-close">×</button></form><span class="eyebrow">/PERSISTENT AGENT</span><h2>Define the mandate.</h2><form id="agent-form"><label>Agent label<input id="agent-label" maxlength="80" placeholder="e.g. Research engine" required></label><label>Daily spending limit · USDC<input id="agent-limit" max="1000" min="0.000001" required step="0.000001" type="number" value="1.00"></label><p class="field-note" id="agent-model-note">The mandate will allow the gateway's active model.</p><p class="form-error" id="agent-error" role="alert"></p><button class="en-button"><span>Create agent</span><b>↗</b></button></form></dialog>
+<dialog class="en-dialog" id="payment-dialog"><form method="dialog"><button aria-label="Close payment" class="dialog-close">×</button></form><span class="eyebrow">/PAYMENT REQUIRED · HTTP 402</span><h2>Authorize this request.</h2><p class="payment-dialog-amount" id="payment-amount"></p><p id="payment-mode-note"></p><p class="field-note" id="payment-id"></p><p class="form-error" id="payment-error" role="alert"></p><div class="dialog-actions"><button class="en-button" id="confirm-payment"><span>Settle test payment & run</span><b>↗</b></button><button class="en-button secondary" id="cancel-payment"><span>Cancel</span></button></div></dialog>
+<dialog class="en-dialog" id="view-key-dialog"><form method="dialog"><button aria-label="Close auditor key" class="dialog-close">×</button></form><span class="eyebrow">/AUDITOR ACCESS</span><h2>Workspace view key.</h2><p>Creating this credential grants read access to all receipt and payment metadata owned by this workspace. It does not grant inference or spending access.</p><form id="view-key-form"><label>Auditor label<input id="view-key-label" maxlength="80" required placeholder="e.g. Customer review"></label><button class="en-button" id="confirm-view-key"><span>Create read-only key</span><b>↗</b></button></form><div hidden id="view-key-result"><label>New view key<input id="view-key-secret" type="password" readonly autocomplete="off"></label><button class="text-link plain-button" id="copy-view-key">Copy key ↗</button><p class="field-note">Shown once. Store it securely. It is cleared when you disconnect.</p></div><p class="form-error" id="view-key-error" role="alert"></p></dialog>
+<div class="toast" hidden id="toast" role="status"></div>
+<dialog class="en-dialog" id="coming-dialog"><form method="dialog"><button aria-label="Close dialog" class="dialog-close">×</button></form><span class="eyebrow">/ENCLAVE</span><h2>Coming soon.</h2><p id="coming-message">Enclave's official channels are on the way.</p><form method="dialog"><button class="en-button"><span>Back to Enclave</span><b>↗</b></button></form></dialog>

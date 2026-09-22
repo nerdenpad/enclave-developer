@@ -1,0 +1,24 @@
+{
+  "name": "enclave-full",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "setup": "npm --prefix _backend ci && npm --prefix frontend ci",
+    "dev": "node scripts/enclave.mjs dev",
+    "start": "node scripts/enclave.mjs dev",
+    "demo:prepare": "node scripts/enclave.mjs prepare",
+    "demo:register": "node scripts/enclave.mjs register",
+    "demo:stop": "node scripts/enclave.mjs stop",
+    "typecheck": "npm --prefix _backend run typecheck && npm --prefix frontend run typecheck",
+    "build": "npm --prefix frontend run build",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "npm --prefix _backend test",
+    "test:frontend": "npm --prefix frontend test",
+    "test:browser": "npm --prefix frontend run test:e2e",
+    "test:launch": "node tests/local-launch.mjs",
+    "test:integration": "npm --prefix _backend run test:integration",
+    "demo:record": "node --env-file=_backend/.env.demo frontend/scripts/record-demo.mjs --run-inference --record"
+  }
+}

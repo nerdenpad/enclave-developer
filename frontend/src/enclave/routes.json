@@ -1,0 +1,82 @@
+{
+  "/404/": {
+    "file": "404.html",
+    "title": "Page not found \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/architecture/": {
+    "file": "architecture.html",
+    "title": "Architecture \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/dashboard/": {
+    "file": "dashboard.html",
+    "title": "Confidential workspace \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/": {
+    "file": "home.html",
+    "title": "Enclave \u2014 Confidential AI for the institutional chain",
+    "description": "Confidential AI inference, attested receipts and private agent commerce. Explore the Enclave protocol."
+  },
+  "/insights/attestation-before-inference/": {
+    "file": "insights-attestation-before-inference.html",
+    "title": "Attestation before inference: where privacy begins \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/insights/": {
+    "file": "insights.html",
+    "title": "Insights \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/insights/private-agent-commerce/": {
+    "file": "insights-private-agent-commerce.html",
+    "title": "Private AI meets programmable USDC payments. \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/insights/understanding-inference-receipts/": {
+    "file": "insights-understanding-inference-receipts.html",
+    "title": "A receipt for every answer. No prompt disclosure. \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/legal/privacy-policy/": {
+    "file": "legal-privacy-policy.html",
+    "title": "Privacy policy \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/legal/risk-disclosure/": {
+    "file": "legal-risk-disclosure.html",
+    "title": "Risk disclosure \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/legal/terms-of-service/": {
+    "file": "legal-terms-of-service.html",
+    "title": "Terms of service \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/technology/": {
+    "file": "technology.html",
+    "title": "Technology \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/technology/model-registry/": {
+    "file": "technology-model-registry.html",
+    "title": "Model registry \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/technology/private-inference/": {
+    "file": "technology-private-inference.html",
+    "title": "Private inference \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/technology/receipts-and-audit/": {
+    "file": "technology-receipts-and-audit.html",
+    "title": "Receipts and audit \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  },
+  "/technology/sealed-agents/": {
+    "file": "technology-sealed-agents.html",
+    "title": "Sealed agents \u2014 Enclave",
+    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+  }
+}

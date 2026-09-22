@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "checkedAt": "2026-09-19T17:09:38.499Z",
+  "model": "z-ai/glm-5.3-flash",
+  "requests": 1,
+  "maxTokens": 32,
+  "elapsedMs": 14412,
+  "outputBytes": 163,
+  "cpuStatus": "UpToDate",
+  "gpuCount": 8,
+  "policyVersion": "development-glm-2026-09-19.2",
+  "providerSignatureVerified": true,
+  "receiptBindingVerified": true,
+  "encryptedRoundTripVerified": true,
+  "restartReplayVerified": true,
+  "auditorExportVerified": true,
+  "settlementTx": "0xe45b77a3fd3ca6cca2ffd79ee91495ccb9e02252e2bf8970e2cccd477a5496a9",
+  "receiptHash": "0xfd456f44da99a2e04695eab6053c44a498b1a7bb43c67bd41a2a1f48f1d52db8",
+  "anchorTx": "0x58b2d93d268ccd9c0ed09fe15c83211e33d4c4854f311049abf25dc8516019c7",
+  "chain": "disposable Anvil 31337",
+  "localGatewayTeeMode": "dev",
+  "hardwareProvider": "NEAR managed GPU"
+}

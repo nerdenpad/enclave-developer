@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "version": "REVIEW-REQUIRED",
+  "validFrom": "1970-01-01T00:00:00Z",
+  "validUntil": "1970-01-01T00:00:01Z",
+  "maxSessionSeconds": 120,
+  "profiles": [],
+  "provenance": {
+    "status": "REVIEW_REQUIRED",
+    "instructions": "Run candidate.py against a public direct NEAR endpoint, review the resulting measurements and authenticated runtime actions against official immutable source/image digests, then approve a version and expiry. Empty or expired policy is intentionally rejected."
+  }
+}

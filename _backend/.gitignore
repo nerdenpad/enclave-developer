@@ -1,0 +1,34 @@
+node_modules
+dist
+.env
+.env.modal
+.env.near
+__pycache__/
+*.pyc
+*.log
+coverage
+coverage-*/
+.cache
+broadcast
+out
+cache
+lib
+data/*.json
+**/data/cvm.json
+!data/.gitkeep
+.DS_Store
+*.tsbuildinfo
+work/
+contracts/lcov.info
+
+# Local credentials and runtime state; keep shareable configuration templates.
+.env.*
+!.env*.example
+/data/*
+!/data/.gitkeep
+.venv/
+venv/
+.work/
+
+# Rebuilt with npm run contracts:compile.
+/contracts/out-solc/

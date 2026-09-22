@@ -1,0 +1,36 @@
+# Dependencies and build output in both applications.
+node_modules/
+dist/
+.output/
+.tanstack/
+.wrangler/
+.nitro/
+coverage/
+coverage-*/
+test-results/
+playwright-report/
+recordings/
+*.log
+*.tsbuildinfo
+
+# Local credentials, signer state and runtime diagnostics.
+.env
+.env.*
+!.env*.example
+.dev.vars
+.venv/
+venv/
+__pycache__/
+*.pyc
+work/
+.work/
+.local/
+_backend/data/*
+!_backend/data/.gitkeep
+_backend/contracts/out-solc/
+_backend/contracts/out/
+_backend/contracts/cache/
+_backend/contracts/broadcast/
+
+.DS_Store
+Thumbs.db

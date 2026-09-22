@@ -1,0 +1,50 @@
+{
+  "name": "enclave",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @enclave/api",
+    "worker": "npm run dev -w @enclave/worker",
+    "dev:modal": "node --env-file=.env.modal --import tsx apps/api/src/index.ts",
+    "dev:near": "node --env-file=.env.near --import tsx apps/api/src/index.ts",
+    "near:check": "tsx scripts/check-near.ts",
+    "near:check:gateway": "tsx scripts/test-integration.ts --near-live-only",
+    "test:near": "python -m unittest discover -s infra/near -p test_*.py",
+    "inference:check": "tsx scripts/check-inference.ts",
+    "test:modal": "python -m unittest discover -s infra/modal -p test_*.py && python -m unittest discover -s scripts -p test_modal_*.py && vitest run scripts/register-serving-model.test.ts scripts/check-inference.test.ts",
+    "test": "npm test -w @enclave/core && npm test -w @enclave/api && npm test -w @enclave/worker && npm test -w @enclave/agent-sdk",
+    "db:migrate": "npm run migrate -w @enclave/db",
+    "db:seed": "npm run seed -w @enclave/db",
+    "indexer:reset": "tsx scripts/reset-indexer.ts",
+    "demo": "tsx scripts/demo.ts",
+    "up": "docker compose up -d postgres redis anvil",
+    "contracts:compile": "tsx scripts/compile-contracts.ts",
+    "contracts:deploy": "tsx scripts/deploy-local.ts",
+    "typecheck": "tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/db/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/worker/tsconfig.json && npm run typecheck -w @enclave/agent-sdk",
+    "test:integration": "tsx scripts/test-integration.ts",
+    "test:contracts": "tsx scripts/contracts-test.ts",
+    "test:all": "npm run typecheck && npm test && npm run test:integration && npm run test:contracts",
+    "test:coverage": "npm test -w @enclave/core -- --coverage && npm test -w @enclave/worker -- --coverage && npm test -w @enclave/agent-sdk -- --coverage && tsx scripts/test-integration.ts --coverage",
+    "pretest": "npm run contracts:compile"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "4.1.11",
+    "@x402/core": "2.26.0",
+    "@x402/evm": "2.26.0",
+    "solc": "0.8.28",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "viem": "^2.31.7",
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "tmp": "0.2.7"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

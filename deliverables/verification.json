@@ -1,0 +1,273 @@
+{
+  "passed": true,
+  "recordedAt": "2026-09-21T07:00:16.973Z",
+  "durationSeconds": 112.236,
+  "scenes": [
+    {
+      "seconds": 1.1,
+      "title": "Enclave · frontend and backend",
+      "detail": "A real local gateway, database and blockchain. NEAR supplies the remote GPU inference."
+    },
+    {
+      "seconds": 7.213,
+      "title": "Connected to the workspace",
+      "detail": "The model, payment mode, policy and history come from the backend. The gateway remains in development mode."
+    },
+    {
+      "seconds": 13.555,
+      "title": "The active model",
+      "detail": "The registry identifies the approved model and serving-code hashes. Requests use the gateway's configured model."
+    },
+    {
+      "seconds": 19.655,
+      "title": "Set a spending mandate",
+      "detail": "This agent can use the active model and spend up to 0.20 test USDC per day."
+    },
+    {
+      "seconds": 29.288,
+      "title": "Send an encrypted request",
+      "detail": "The browser encrypts the prompt with AES-256-GCM. The agent mandate is checked by the gateway."
+    },
+    {
+      "seconds": 35.038,
+      "title": "Payment is explicit",
+      "detail": "HTTP 402 produces a payment challenge. This demonstration settles test USDC on local chain 31337."
+    },
+    {
+      "seconds": 42.072,
+      "title": "NEAR inference is running",
+      "detail": "The gateway checks provider evidence. The browser will decrypt the response and verify its receipt."
+    },
+    {
+      "seconds": 50.045,
+      "title": "Response received and verified",
+      "detail": "The response, input/output hashes and EIP-712 signature match. The text below is the live model output."
+    },
+    {
+      "seconds": 61.425,
+      "title": "Inspect the signed receipt",
+      "detail": "The receipt binds model, serving code, input and output hashes. Signature verification is separate from hardware attestation."
+    },
+    {
+      "seconds": 70.44,
+      "title": "Anchored on the local chain",
+      "detail": "The worker submitted a real local-chain transaction. Its hash is stored with the receipt."
+    },
+    {
+      "seconds": 78.783,
+      "title": "Payment and usage history",
+      "detail": "Payment status, amount and settlement transaction are read from the database; no browser-generated usage data."
+    },
+    {
+      "seconds": 87.651,
+      "title": "Export an audit record",
+      "detail": "The export contains loaded receipt and payment metadata. Prompt text, model answers and credentials are excluded."
+    },
+    {
+      "seconds": 94.386,
+      "title": "History survives a page reload",
+      "detail": "The API key is held only in memory, so reconnecting is required. Backend records remain available."
+    },
+    {
+      "seconds": 100.816,
+      "title": "Frontend and backend, connected",
+      "detail": "Live NEAR inference · encrypted prompts and responses · signed receipts · persistent history · local test settlement."
+    }
+  ],
+  "responses": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/models",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tcb/policies",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agents",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents/14816739-8ce5-484e-a43d-7135233611bf",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/attestation/quote",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/session",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/inference",
+      "status": 402
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/x402/settle",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/inference",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tcb/policies",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/models",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace",
+      "status": 200
+    }
+  ],
+  "pageErrors": [],
+  "recoveryAttempts": 0,
+  "liveProviderRequests": 1,
+  "boundaries": [
+    "Software development gateway",
+    "NEAR remote GPU inference",
+    "Local Anvil test-USDC settlement",
+    "No production hardware-custody claim"
+  ]
+}

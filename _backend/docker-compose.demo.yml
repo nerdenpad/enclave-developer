@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: enclave
+      POSTGRES_PASSWORD: enclave_demo
+      POSTGRES_DB: enclave_demo
+    ports:
+      - "127.0.0.1:${DEMO_PG_PORT:-15433}:5432"
+    volumes:
+      - demo_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enclave -d enclave_demo"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${DEMO_REDIS_PORT:-16379}:6379"
+    volumes:
+      - demo_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+  anvil:
+    # Pin the tested Anvil build so a restart cannot silently upgrade state format.
+    image: ghcr.io/foundry-rs/foundry@sha256:0c00cb0bda1ab1b91c9a6bf60f4c76c09c1a8870824b6d4718afbabacf6f9a17
+    # The image's foundry user cannot write a newly created root-owned named volume.
+    user: "0:0"
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--silent", "--state", "/state/anvil.json", "--state-interval", "1", "--preserve-historical-states"]
+    ports:
+      - "127.0.0.1:${DEMO_RPC_PORT:-18545}:8545"
+    volumes:
+      - demo_anvil:/state
+    stop_grace_period: 30s
+volumes:
+  demo_pg:
+  demo_redis:
+  demo_anvil:

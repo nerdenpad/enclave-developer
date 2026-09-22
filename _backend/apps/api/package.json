@@ -1,0 +1,33 @@
+{
+  "name": "@enclave/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@enclave/core": "*",
+    "@enclave/db": "*",
+    "@hono/node-server": "^1.19.0",
+    "@hono/trpc-server": "^0.4.0",
+    "@trpc/server": "^11.4.4",
+    "bullmq": "^5.58.5",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.9.6",
+    "ioredis": "^5.7.0",
+    "pino": "^9.9.0",
+    "superjson": "^2.2.2",
+    "viem": "^2.31.7",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "4.1.11"
+  }
+}

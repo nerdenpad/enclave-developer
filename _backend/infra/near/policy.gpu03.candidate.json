@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "version": "REVIEW-REQUIRED-gpu03-2026-09-19",
+  "validFrom": "1970-01-01T00:00:00Z",
+  "validUntil": "1970-01-01T00:00:01Z",
+  "maxSessionSeconds": 120,
+  "profiles": [
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "appComposeSha256": "55db164f4f8c6a837c2217c601c21bba4758f908536a6cd5b2978550205a9179",
+      "measurements": {
+        "tee_tcb_svn": "0b010400000000000000000000000000",
+        "mr_seam": "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d",
+        "mr_signer_seam": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "seam_attributes": "0000000000000000",
+        "td_attributes": "0000001000000000",
+        "xfam": "e702060000000000",
+        "mr_td": "df4d77c857de652bd0fafa343a2026b51071ee03773d076d283abf1a7d36ff91ffa279ee4a617ac664f7e2a2c8d5891b",
+        "mr_config_id": "0155db164f4f8c6a837c2217c601c21bba4758f908536a6cd5b2978550205a9179000000000000000000000000000000",
+        "mr_owner": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "mr_owner_config": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "rt_mr0": "bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590",
+        "rt_mr1": "ff61e68fa04516b1813d2d478397a97a58f9ccc402b6d96fb73f5e5104a4acf155913caec99a0c19afc16ae0f3a77726",
+        "rt_mr2": "4d662c04766145dfe084fd014969b19c387afe9bb1d4f972c6968d28a7a8b4937c414603a2cf446105eddce67a86f9ce",
+        "rt_mr3": "acb49684097878fb9ac35b2cf8bbe10c0ddbb2c1aed0b3d1e1121d8dbaa58525ce09d3c8ea546dc7fe9ef6575a0cec60"
+      },
+      "composeManagerActionsSha256": "9c4e09f23a6fe0f4dfee933eadba11f8c7a8e6cd9404eb6a8d80a39e563c4d7c",
+      "composeManagerImage": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be",
+      "gpuCount": 8,
+      "gpuModels": [
+        "GH100"
+      ]
+    }
+  ],
+  "provenance": {
+    "status": "REVIEW_REQUIRED",
+    "scope": "DEVELOPMENT candidate only. Explicit trust in NEAR control plane, privileged runtime and manager assertions is required. No immutable-runtime or precise running-container proof.",
+    "observedHost": "glm-5-3-flash.completions.near.ai",
+    "observedInstanceLabel": "gpu03",
+    "review": "GPU03-REVIEW.md",
+    "snapshot": "provenance/glm-gpu03-2026-09-19.json",
+    "sourceHashes": "provenance/glm-gpu03-source-hashes.json",
+    "differences": "HiCache variant; different MRCONFIGID/RTMR3 and 115-action history; manager and base services otherwise identical. Candidate is expired and was not added to active policy."
+  }
+}
