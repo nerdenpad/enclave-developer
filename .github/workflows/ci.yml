@@ -42,6 +42,10 @@ jobs:
       - run: npm run contracts:compile
       - name: Unit and isolated database integration coverage
         run: npm run test:coverage
+      - name: Install pinned Forge for contract coverage
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
       - run: npm run test:contracts -- --coverage
       - uses: actions/upload-artifact@v4
         if: always()
@@ -75,6 +79,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Browser flows with local API fixtures
         run: npm run test:e2e
+      - name: Receipt verification against isolated contracts
+        working-directory: .
+        run: |
+          npm --prefix _backend ci
+          npm run test:receipt-chain
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

@@ -16,6 +16,9 @@ export const HealthSchema = z.object({
   servingModel: z.object({ id: z.string(), name: z.string(), modelHash: hex32, codeHash: hex32 }),
   receiptSigner: address, verifierAddress: address, agentRuntimeEnabled: z.boolean(),
   inferencePriceUsdc: z.number().finite().nonnegative(),
+  deployment: z.object({ stage: z.literal("development"), productionReady: z.literal(false), gatewayKeyCustody: z.literal("software") }).optional(),
+  limits: z.object({ inferenceTimeoutMs: z.number().int().positive().safe(), maxOutputTokens: z.number().int().positive().nullable() }).optional(),
+  settlementToken: address.optional(),
 });
 export type Health = z.infer<typeof HealthSchema>;
 const QuoteSchema = z.object({

@@ -45,11 +45,14 @@ npm run demo:stop
 
 ## Verification
 
+Open `/verify` to verify an exported receipt without a workspace API key. Local verification stays in the browser; the optional RPC mode checks contract acceptance, model policy binding and a supplied anchor transaction. Open `/status` for public deployment settings and limits. See [E1 release acceptance](docs/e1-release.md) for the remaining infrastructure and software work; E1 is not yet released.
+
 ```sh
 npm run typecheck
 npm test
 npm run test:browser
 npm run build
+npm run test:receipt-chain
 ```
 
 Browser tests use local API fixtures without provider charges. Install their browser with `cd frontend && npx playwright install chromium` if needed. Backend integration tests are available through `npm run test:integration` and use an isolated Docker test stack. GitHub Actions runs both applications from the repository root workflows.

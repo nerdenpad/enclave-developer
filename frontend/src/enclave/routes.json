@@ -1,4 +1,12 @@
 {
+  "/verify/": {
+    "title": "Verify receipt — Enclave",
+    "description": "Verify an Enclave receipt locally and inspect its contract policy and anchor transaction."
+  },
+  "/status/": {
+    "title": "Deployment status — Enclave",
+    "description": "Inspect the reported network, model, policy and limits of this Enclave deployment."
+  },
   "/404/": {
     "file": "404.html",
     "title": "Page not found \u2014 Enclave",

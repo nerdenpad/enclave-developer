@@ -18,6 +18,7 @@
     "test:frontend": "npm --prefix frontend test",
     "test:browser": "npm --prefix frontend run test:e2e",
     "test:launch": "node tests/local-launch.mjs",
+    "test:receipt-chain": "npm --prefix _backend run contracts:compile && node --import ./_backend/node_modules/tsx/dist/loader.mjs frontend/scripts/check-receipt-chain.ts",
     "test:integration": "npm --prefix _backend run test:integration",
     "demo:record": "node --env-file=_backend/.env.demo frontend/scripts/record-demo.mjs --run-inference --record"
   }

@@ -85,7 +85,7 @@ export function createApp(gateway: EnclaveGateway, log: Logger, agentRuntime?: A
     );
   });
 
-  app.get("/health", (c) => c.json(gateway.health()));
+  app.get("/health", (c) => { c.header("Cache-Control", "no-store"); return c.json(gateway.health()); });
   app.get("/v1/workspace", async (c) => {
     c.header("Cache-Control", "no-store");
     const parsed = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -321,7 +321,7 @@ export function createApp(gateway: EnclaveGateway, log: Logger, agentRuntime?: A
     }));
   });
 
-  app.get("/v1/tcb/policies", async (c) => c.json(await gateway.listTcbPolicies()));
+  app.get("/v1/tcb/policies", async (c) => { c.header("Cache-Control", "no-store"); return c.json(await gateway.listTcbPolicies()); });
 
   app.post("/v1/tcb/rotate", async (c) => {
     const parsed = TcbRotateBody.safeParse(await readJson(c));

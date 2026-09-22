@@ -109,7 +109,9 @@ describe("private browser workspace", () => {
     const f = fixture(), result = await f.app.request("/health");
     expect(await result.json()).toMatchObject({ ok: true, chainId: 31337, teeMode: "dev", paymentMode: "mock", inferenceBackend: "echo",
       servingModel: { id: "echo", name: "echo", modelHash: hash, codeHash: cvm.codeHash }, receiptSigner: address,
-      verifierAddress: config.ATTESTATION_VERIFIER_ADDRESS, agentRuntimeEnabled: false, inferencePriceUsdc: 0.1 });
+      verifierAddress: config.ATTESTATION_VERIFIER_ADDRESS, agentRuntimeEnabled: false, inferencePriceUsdc: 0.1,
+      deployment: { stage: "development", productionReady: false, gatewayKeyCustody: "software" },
+      limits: { inferenceTimeoutMs: config.INFERENCE_TIMEOUT_MS, maxOutputTokens: null }, settlementToken: config.USDC_ADDRESS });
     expect(JSON.stringify(f.gateway.health())).not.toMatch(/secret-canary|PRIVATE|DATABASE|postgres/);
   });
   it("reports the configured NEAR identity without making a provider request or implying gateway hardware", () => {
@@ -117,6 +119,8 @@ describe("private browser workspace", () => {
     const nearConfig = { ...config, INFERENCE_BACKEND: "near-verified" as const, INFERENCE_MODEL: nearCvm.config.modelId };
     const gateway = new EnclaveGateway({} as Database, nearCvm, nearConfig, createLogger("silent"), undefined);
     expect(gateway.health()).toMatchObject({ inferenceBackend: "near-verified", teeMode: "dev", servingModel: { id: nearConfig.INFERENCE_MODEL,
-      name: nearConfig.INFERENCE_MODEL, modelHash: nearCvm.modelHash, codeHash: cvm.codeHash }, receiptSigner: cvm.enclaveAddress });
+      name: nearConfig.INFERENCE_MODEL, modelHash: nearCvm.modelHash, codeHash: cvm.codeHash }, receiptSigner: cvm.enclaveAddress,
+      deployment: { productionReady: false, gatewayKeyCustody: "software" },
+      limits: { maxOutputTokens: config.NEAR_MAX_TOKENS, inferenceTimeoutMs: config.INFERENCE_TIMEOUT_MS } });
   });
 });

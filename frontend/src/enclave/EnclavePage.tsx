@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import routes from "./routes.json";
 import homeStyles from "./home-reference.css?raw";
 import "./dashboard.css";
+import { VerifyReceiptPage } from "./VerifyReceiptPage";
+import { DeploymentStatusPage } from "./DeploymentStatusPage";
 
 const pages = import.meta.glob("./pages/*.html", {
   query: "?raw",
@@ -9,7 +11,7 @@ const pages = import.meta.glob("./pages/*.html", {
   eager: true,
 }) as Record<string, string>;
 
-export type RouteMeta = { file: string; title: string; description: string };
+export type RouteMeta = { file?: string; title: string; description: string };
 
 export function normalizePath(pathname: string): string {
   return pathname.replace(/\/index\.html$/, "/").replace(/\/?$/, "/");
@@ -52,6 +54,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
   const markup = pages[`./pages/${meta.file}`] ?? "";
 
   useEffect(() => {
+    if (path === "/verify/" || path === "/status/") return;
     let cancelled = false;
     let disposeDashboard: (() => void) | undefined;
     void (async () => {
@@ -74,6 +77,8 @@ export function EnclavePage({ pathname }: { pathname: string }) {
     };
   }, [path]);
 
+  if (path === "/verify/") return <VerifyReceiptPage />;
+  if (path === "/status/") return <DeploymentStatusPage />;
   return (
     <>
       {path === "/" ? <style dangerouslySetInnerHTML={{ __html: homeStyles }} /> : null}

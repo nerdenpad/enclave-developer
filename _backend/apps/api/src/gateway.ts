@@ -219,6 +219,10 @@ export class EnclaveGateway {
       verifierAddress: this.config.ATTESTATION_VERIFIER_ADDRESS,
       agentRuntimeEnabled: this.config.AGENT_RUNTIME_ENABLED,
       inferencePriceUsdc: this.config.INFERENCE_PRICE_USDC,
+      deployment: { stage: "development" as const, productionReady: false as const, gatewayKeyCustody: "software" as const },
+      limits: { inferenceTimeoutMs: this.config.INFERENCE_TIMEOUT_MS,
+        maxOutputTokens: this.config.INFERENCE_BACKEND === "near-verified" ? this.config.NEAR_MAX_TOKENS : null },
+      settlementToken: this.config.USDC_ADDRESS,
     };
   }
 
