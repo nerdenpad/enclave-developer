@@ -1,6 +1,6 @@
 # E1 release acceptance
 
-E1 status: **not released**. A software pilot is hosted at https://enclaveagent.tech. It uses NEAR inference, software gateway keys and local-chain test settlement. A GitHub push is source delivery, not deployment by itself.
+E1 status: **not released**. A software pilot is hosted at https://enclaveagent.tech. It is configured for NEAR inference, software gateway keys and local-chain test settlement. As of 24 September 2026, hosted inference is blocked by NVIDIA NRAS HTTP 403 from the VPS; strict verification remains enabled. A GitHub push is source delivery, not deployment by itself.
 
 ## Available now
 
@@ -18,7 +18,7 @@ E1 status: **not released**. A software pilot is hosted at https://enclaveagent.
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the production signer and request path on the accepted hardware |
 | On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI | Choose chain and approved policies, deploy contracts, bind signer and record addresses; test anchoring and confirmations there |
 | USDC without duplicate charge/execution | MockUSDC, EIP-3009/x402 and recovery tests | Verify the real token domain/ABI, fund test wallets, implement the browser wallet authorization flow and exercise real-network restart/recovery |
-| Verify receipt page | `/verify`, local checks plus RPC contract/policy/anchor checks | Deploy this page publicly and repeat checks against the accepted network |
+| Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
 | Production mode | Correctly rejected by the current software adapter | Replace software custody and pass hardware/deployment acceptance; do not remove the guard as a shortcut |
 | Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |
 
@@ -28,7 +28,7 @@ As of 24 September 2026, a Debian 12 VPS (8 vCPU, 16 GB RAM) hosts the software 
 
 The operator must supply:
 
-1. A domain and DNS control, target hosting account, TLS ingress and customer-approved resource budget.
+1. Production hosting and a customer-approved resource budget. The pilot already has a domain, DNS and TLS ingress.
 2. Confidential VM access for our own container workload, CPU evidence format/trust roots, measured image/configuration policy, a key derivation/release interface and durable encrypted storage. A managed inference API key alone does not supply these capabilities.
 3. The EVM network, reviewed RPC, required confirmation/finality policy, real USDC address and EIP-712 domain, funded deployment/relay wallets and governance addresses.
 4. An authentication model for website users and receipt ownership. The current operator API-key field is a development facility.

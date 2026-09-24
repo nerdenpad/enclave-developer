@@ -1,85 +1,67 @@
 # Enclave
 
-The connected Enclave frontend and backend in one repository. The dashboard sends encrypted requests to the gateway, displays real model and policy data, requires explicit local payment confirmation, verifies signed receipts, and reads persistent history.
+Inference with signed receipts, attestation checks and on-chain verification.
 
-## Layout
+[Website](https://enclaveagent.tech) · [Dashboard](https://enclaveagent.tech/dashboard) · [Verify a receipt](https://enclaveagent.tech/verify) · [Deployment status](https://enclaveagent.tech/status) · [Roadmap](docs/roadmap.md)
+
+Enclave connects a model request to a signed record of its model, code, input, output and attestation reference. The dashboard handles encrypted requests, payment confirmation and receipt history. A separate verification page checks exported receipts without a workspace account.
+
+## Current deployment
+
+**Software pilot. E1 is not released.** The website and API run on a standard VPS. NEAR is the selected remote GPU provider; gateway keys and the receipt signer remain in software on the VPS. Payments use MockUSDC on a private Anvil chain, not real USDC.
+
+As of 24 September 2026, the public pages, authenticated workspace and HTTPS checks pass. Hosted inference is blocked: NVIDIA's attestation service returns HTTP 403 to the VPS. Verification remains enforced. The earlier [local demonstration](deliverables/README.md) includes a successful NEAR request; it is not evidence of successful inference on the hosted deployment.
+
+## How it works
+
+1. The browser encrypts a prompt for the gateway and asks the user to confirm the development payment.
+2. The gateway checks the request and payment state. With the NEAR integration selected, it verifies remote CPU/GPU evidence and the provider connection before sending the prompt.
+3. A successful request returns encrypted output and a signed inference receipt. A worker anchors the receipt through the configured contracts.
+4. The user can export the receipt and check its signature in the browser. Optional RPC checks evaluate contract acceptance, model policy and a supplied anchor transaction.
+
+The software gateway can access the prompt and its signing keys. Remote GPU attestation does not make this VPS confidential. Receipt signature verification also does not independently verify hardware evidence or prove payment. See [architecture and trust boundaries](docs/architecture.md).
+
+## Repository
+
+The frontend, backend and contracts share `main`.
 
 | Directory | Contents |
 | --- | --- |
-| `frontend/` | TanStack/React dashboard, browser API client and browser tests |
-| `_backend/` | Hono API, workers, PostgreSQL schema, Solidity contracts and provider integrations |
-| `scripts/` | Combined local startup |
-| `deliverables/` | Recorded walkthrough and verification notes |
+| [frontend](frontend/) | React dashboard, receipt verifier and deployment status page |
+| [_backend](_backend/) | Hono API, workers, PostgreSQL, provider adapters and Solidity contracts |
+| [infra/pilot](infra/pilot/) | Debian deployment, HTTPS and service configuration |
+| [docs](docs/) | Architecture, development and release requirements |
+| [deliverables](deliverables/) | Recorded local walkthrough and verification notes |
 
-The two applications retain their own npm lockfiles and dependency trees. There are no nested Git repositories and no root npm workspace dependency hoisting.
+## Run locally
 
-## Hosted pilot
-
-The software pilot is at **https://enclaveagent.tech**. The website and API run
-on a Debian VPS with automatic service startup and HTTPS certificate renewal.
-The gateway remains software-based and payments use test USDC on a private
-Anvil chain. Access to inference requires a separately issued pilot API key.
-See [the deployment runbook](infra/pilot/README.md) and [E1 acceptance](docs/e1-release.md).
-
-Deployment check on 24 September: public pages, authenticated workspace and
-TLS passed. End-to-end inference is blocked because NVIDIA NRAS returns HTTP
-403 to this VPS. The strict verifier remains enabled; no successful model
-response is claimed for this deployment yet.
-
-## Local deployment
-
-Use Node.js 22.12+ or 24 LTS, npm, and a running local Docker engine.
+Requires Node.js 22.12+ and a running Docker engine.
 
 ```sh
 npm run setup
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173/dashboard/**. Enter `/api` for the gateway URL and use the private `DEMO_API_KEY` from `_backend/.env.demo` in the password field. The browser retains that credential only in memory.
+Open `http://127.0.0.1:5173/dashboard/`. Use `/api` as the gateway URL and the private `DEMO_API_KEY` generated in `_backend/.env.demo`. The browser holds this key in memory.
 
-The launcher prepares the isolated demo, starts the API on port 8789, registers its serving model, and starts the anchoring worker and frontend. PostgreSQL, Redis and Anvil use localhost ports 15433, 16379 and 18545. It rejects occupied application ports, validates existing database/chain identity and never automatically reseeds an existing demo. Startup does not send an inference request.
-
-An initial clean checkout uses the local echo provider. To select NEAR before initial preparation, use an existing reviewed backend profile:
-
-```sh
-npm run demo:prepare -- --near-env /absolute/path/to/private/.env.near
-npm run dev
-```
-
-See [_backend/docs/near-development.md](_backend/docs/near-development.md) for the Python verifier, provider credentials and reviewed attestation policy. NEAR inference uses paid provider credits. Keep the policy current; do not bypass failed evidence checks. `npm run dev` preserves an already configured provider.
-
-This combined repository uses its own `enclave-full-demo` Docker project and volumes, separate from the former source folder's `enclave-demo` stack. Its profile and signer state live only in the ignored `_backend/.env.demo` and `_backend/data/demo/` paths. Both stacks use the same local ports, so stop the former demo before starting this one. Existing database/chain state must match its local manifest; the launcher refuses to adopt unrelated volumes or reset mismatched data.
-
-Press Ctrl+C in the launcher terminal to stop the API, worker and frontend. Then stop only the demo containers, preserving state:
-
-```sh
-npm run demo:stop
-```
+A clean checkout starts with a local echo provider and test payments. Startup does not make a paid inference request. See the [development guide](docs/development.md) to configure NEAR, manage local services and run integration checks.
 
 ## Verification
-
-Open `/verify` to verify an exported receipt without a workspace API key. Local verification stays in the browser; the optional RPC mode checks contract acceptance, model policy binding and a supplied anchor transaction. Open `/status` for public deployment settings and limits. See [E1 release acceptance](docs/e1-release.md) for the remaining infrastructure and software work; E1 is not yet released.
 
 ```sh
 npm run typecheck
 npm test
 npm run test:browser
 npm run build
-npm run test:receipt-chain
 ```
 
-Browser tests use local API fixtures without provider charges. Install their browser with `cd frontend && npx playwright install chromium` if needed. Backend integration tests are available through `npm run test:integration` and use an isolated Docker test stack. GitHub Actions runs both applications from the repository root workflows.
+The [CI workflow](.github/workflows/ci.yml) covers both applications, provider checks, contracts and browser flows. Browser tests use fixtures; hardware and paid-provider acceptance are separate checks. [E1 acceptance](docs/e1-release.md) lists the evidence required for release.
 
-After `npm run demo:prepare`, `npm run test:launch` starts the combined services, reads the authenticated workspace through the frontend proxy, and verifies graceful shutdown and closed application ports. Run it with the launcher stopped and Docker available. It sends no inference request and leaves the demo database containers running.
+## Documentation
 
-## Trust and deployment boundaries
-
-NEAR can supply verified remote GPU inference. The gateway, its session keys and receipt signer remain in a software development environment. Local settlement uses test USDC on Anvil chain 31337. The dashboard does not submit real-network wallet authorizations or start autonomous agent jobs.
-
-This local deployment does not publish a public website. Public hosting needs an HTTPS reverse proxy for `/api` and a server-side user authentication layer; the Vite proxy and operator API-key field are development facilities. The backend deliberately rejects production mode while gateway key custody remains in software.
-
-Secrets, local `.env` profiles, CVM keys, virtual environments, dependency folders, recordings and generated runtime files are excluded from Git. Only configuration examples belong in a commit. This combined repository is independent of the original frontend's Lovable connection.
-
-## Recorded walkthrough
-
-[Enclave-Demo-2026-09-21.mp4](deliverables/Enclave-Demo-2026-09-21.mp4) shows the connected frontend and backend with a live NEAR request, signature verification, local-chain anchoring and persisted history. [Verification notes](deliverables/README.md) describe the environment and known limits. To make a new recording while the local services are running, use `npm run demo:record`; this performs a real provider workflow.
+- [Architecture and trust boundaries](docs/architecture.md)
+- [Development and tests](docs/development.md)
+- [NEAR integration](_backend/docs/near-development.md)
+- [Single-server deployment](infra/pilot/README.md)
+- [Roadmap](docs/roadmap.md) and [E1 acceptance](docs/e1-release.md)
+- [Recorded demonstration](deliverables/README.md)
