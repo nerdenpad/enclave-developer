@@ -16,6 +16,8 @@
     "build:node": "node scripts/build-node.mjs",
     "test:pilot": "node frontend/scripts/check-pilot.mjs",
     "check:arc": "node frontend/scripts/check-arc.mjs",
+    "budget:arc": "npm --prefix _backend run contracts:compile && node frontend/scripts/arc-budget.mjs",
+    "check:arc-wallets": "node frontend/scripts/check-arc-wallets.mjs",
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "npm --prefix _backend test",
     "test:frontend": "npm --prefix frontend test",

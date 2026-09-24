@@ -2,6 +2,8 @@
 
 Arc Mainnet is the selected USDC settlement network. The public pilot still uses private Anvil and MockUSDC. Selecting Arc in the browser does not migrate that backend or enable real payments.
 
+See [payment launch preparation](payment-launch.md) for wallet roles, the starting reserve and read-only funding checks. Pricing approval is currently deferred.
+
 ## Reviewed public parameters
 
 | Parameter | Value |
