@@ -10,8 +10,8 @@ Status reviewed on 24 September 2026. Milestones are tied to acceptance evidence
 | Deployment transparency | Implemented | Public `/status` page with configured network, model, policy and limits |
 | Hosted inference acceptance | Blocked | Successful strict CPU/GPU verification, model response and independently checked receipt from the hosted path |
 | Confidential gateway and key custody | Pending infrastructure and implementation | Accepted hardware measurements, protected key release, tamper rejection and encrypted restart recovery |
-| Public-chain settlement | Pending network selection and acceptance | Reviewed contracts, real USDC, browser wallet authorization and restart/recovery tests without duplicate charge or execution |
-| Wallet connections | Browser connection implemented; remote setup pending | Direct WalletConnect integration with a custom chooser; Project ID and live 50-wallet catalog acceptance still required. Real-USDC authorization awaits network selection; see [scope and acceptance](wallet-payments.md) |
+| Public-chain settlement | Arc Mainnet selected; deployment and acceptance pending | Read-only USDC domain checks pass; contract deployment, browser payment authorization and restart/recovery tests remain. See [Arc configuration](arc-deployment.md) |
+| Wallet connections | Browser connection and Arc switching implemented; remote setup pending | Direct WalletConnect integration with a custom chooser; Project ID and live 50-wallet catalog acceptance still required. See [scope and acceptance](wallet-payments.md) |
 | Production user access | Pending | Deployed user authentication and receipt ownership checks |
 | E1 release | Not released | All eight requirements in the [acceptance matrix](e1-release.md) pass on the final deployment |
 
@@ -21,6 +21,6 @@ Resolve NVIDIA attestation-service access from the hosting network, review any e
 
 ## After pilot acceptance
 
-Move gateway key custody into an approved confidential runtime, select the settlement network and complete user authentication. Migration to Phala is a planned hosting option, subject to funding and hardware acceptance; it is not part of the current deployment.
+Move gateway key custody into an approved confidential runtime, deploy settlement on Arc Mainnet and complete user authentication. Migration to Phala is a planned hosting option, subject to funding and hardware acceptance; it is not part of the current deployment.
 
 Release documentation will record the deployed code revision, network, contract addresses, model and reviewed policy versions alongside the acceptance evidence. The production label remains gated on that evidence.

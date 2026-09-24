@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type SignClient from "@walletconnect/sign-client";
-import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId } from "./wallet-session";
+import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId, switchBrowserToArc } from "./wallet-session";
 import type { BrowserProvider } from "./wallets";
 
 const first = `0x${"11".repeat(20)}`, second = `0x${"22".repeat(20)}`;
@@ -8,7 +8,7 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: 
 function browser() {
   const listeners = new Map<string, (...args: unknown[]) => void>();
   const state = { accounts: [first], chain: "0x1" };
-  const request = vi.fn(async ({ method }: { method: string }) => method === "eth_chainId" ? state.chain : state.accounts);
+  const request = vi.fn(async ({ method }: { method: string }): Promise<unknown> => method === "eth_chainId" ? state.chain : state.accounts);
   const provider: BrowserProvider = { request, on: (name, handler) => { listeners.set(name, handler); }, removeListener: name => { listeners.delete(name); } };
   return { wallet: { id: "fixture", name: "Fixture", provider }, request, state, listeners };
 }
@@ -88,5 +88,30 @@ describe("WalletConnect lifecycle", () => {
     const pending = connectWalletConnect("a".repeat(32), 8453, new AbortController().signal, vi.fn(), changed, mock.getClient);
     mock.gate.resolve(session()); await expect(pending).rejects.toThrow();
     expect(mock.disconnect).toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled();
+  });
+});
+
+describe("Arc network switching", () => {
+  it("adds an unknown Arc chain with 18-decimal native USDC, then verifies the switch", async () => {
+    const mock = browser();
+    mock.request.mockRejectedValueOnce({ code: 4902 }).mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce("0x13b2");
+    await switchBrowserToArc(mock.wallet.provider);
+    expect(mock.request.mock.calls.map(([args]) => args.method)).toEqual(["wallet_switchEthereumChain", "wallet_addEthereumChain", "wallet_switchEthereumChain", "eth_chainId"]);
+    expect(mock.request).toHaveBeenNthCalledWith(2, { method: "wallet_addEthereumChain", params: [{ chainId: "0x13b2", chainName: "Arc Mainnet", nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 }, rpcUrls: ["https://rpc.mainnet.arc.io"], blockExplorerUrls: ["https://explorer.arc.io"] }] });
+  });
+  it("does not add a chain after a user rejection", async () => {
+    const mock = browser(); mock.request.mockRejectedValueOnce({ code: 4001 });
+    await expect(switchBrowserToArc(mock.wallet.provider)).rejects.toMatchObject({ code: 4001 });
+    expect(mock.request).toHaveBeenCalledTimes(1);
+  });
+  it("rejects testnet or another chain despite a successful switch response", async () => {
+    const mock = browser(); mock.request.mockResolvedValueOnce(null).mockResolvedValueOnce("0x4cef52");
+    await expect(switchBrowserToArc(mock.wallet.provider)).rejects.toThrow("did not switch");
+  });
+  it("stops subsequent wallet prompts if the account changes during network approval", async () => {
+    const mock = browser(); let current = true;
+    mock.request.mockImplementationOnce(async () => { current = false; throw { code: 4902 }; });
+    await expect(switchBrowserToArc(mock.wallet.provider, () => current)).rejects.toThrow("connection changed");
+    expect(mock.request).toHaveBeenCalledTimes(1);
   });
 });

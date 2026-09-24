@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type SignClient from "@walletconnect/sign-client";
 import type { BrowserWallet } from "./wallets";
+import arc from "./arc-mainnet.json";
 
 const address = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 const addresses = z.array(address).max(100);
 export type WalletAccount = { address: string; chainId: number; name: string; transport: "browser" | "walletconnect" };
-export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void> };
+export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; switchToArc?: () => Promise<void> };
 export type AccountListener = (account: WalletAccount | null) => void;
 const abortError = () => new DOMException("Connection cancelled", "AbortError");
 export function parseChainId(value: unknown): number {
@@ -55,9 +56,33 @@ export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortS
     await abortable(refresh(), signal);
     if (signal.aborted) throw abortError();
     if (!account) throw new Error("Wallet has no available account");
-    return { account, disconnect: async () => { stop(); changed(null); } };
+    return { account, disconnect: async () => { stop(); changed(null); }, switchToArc: async () => {
+      if (!active) throw new Error("Wallet disconnected");
+      const initialAddress = account?.address;
+      await switchBrowserToArc(provider, () => active && initialAddress === account?.address);
+      if (!active) throw new Error("Wallet disconnected");
+      await refresh();
+    } };
   } catch (error) { stop(); throw error; }
   finally { signal.removeEventListener("abort", stop); }
+}
+
+/** User action only: request a network change, never a signature or transaction. */
+export async function switchBrowserToArc(provider: BrowserWallet["provider"], stillCurrent: () => boolean = () => true): Promise<void> {
+  const ensureCurrent = () => { if (!stillCurrent()) throw new Error("Wallet connection changed"); };
+  ensureCurrent();
+  try { await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: arc.chainIdHex }] }); }
+  catch (error) {
+    ensureCurrent();
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== 4902) throw error;
+    await provider.request({ method: "wallet_addEthereumChain", params: [{ chainId: arc.chainIdHex, chainName: arc.name,
+      nativeCurrency: arc.nativeCurrency, rpcUrls: [arc.rpcUrl], blockExplorerUrls: [arc.explorerUrl] }] });
+    ensureCurrent();
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: arc.chainIdHex }] });
+  }
+  ensureCurrent();
+  if (parseChainId(await provider.request({ method: "eth_chainId" })) !== arc.chainId) throw new Error("Wallet did not switch to Arc Mainnet");
+  ensureCurrent();
 }
 
 let clientPromise: Promise<SignClient> | undefined;

@@ -34,11 +34,11 @@ describe("wallet discovery and directory", () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ listings, total: 165 })));
     vi.stubGlobal("fetch", fetcher);
     const signal = new AbortController().signal;
-    const result = await fetchWalletDirectory("a".repeat(32), 8453, "wallet", 2, signal);
+    const result = await fetchWalletDirectory("a".repeat(32), 5042, "wallet", 2, signal);
     expect(result.wallets).toHaveLength(65);
     const url = new URL(fetcher.mock.calls[0]![0]);
     expect(url.origin).toBe("https://explorer-api.walletconnect.com");
-    expect(url.searchParams.get("chains")).toBe("eip155:8453");
+    expect(url.searchParams.get("chains")).toBe("eip155:5042");
     expect(url.searchParams.get("entries")).toBe("100");
     expect(url.searchParams.get("page")).toBe("2");
     expect(fetcher.mock.calls[0]![1].signal).toBe(signal);

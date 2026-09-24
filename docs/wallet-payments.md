@@ -1,6 +1,6 @@
 # Wallet connections and real USDC
 
-The final domain is **enclaveagent.tech**. Wallet connection is implemented separately from payments. Real-USDC settlement remains pending the customer's network selection and contract deployment.
+The final domain is **enclaveagent.tech**. The selected payment network is **Arc Mainnet (5042)**. Wallet connection is implemented separately from payments. Real-USDC settlement still requires contract deployment, funded operator wallets and payment acceptance. See the [Arc deployment profile](arc-deployment.md).
 
 ## Implemented connection
 
@@ -10,7 +10,7 @@ Account and network changes update the browser-wallet display. A WalletConnect a
 
 Browser extensions work without a Project ID. To enable remote pairing and the catalog, create a WalletConnect/Reown project, allow the final domain, and set the public `VITE_WALLETCONNECT_PROJECT_ID` in `frontend/.env.local` before building. See [the Explorer API requirements](https://docs.reown.com/cloud/explorer). No project was supplied at implementation time; live relay pairing and the actual 50-wallet catalog still need acceptance.
 
-The connection chooser offers Ethereum, Base and Arbitrum for pairing. These choices do not configure the payment network. No USDC balance or real payment is displayed until that deployment is configured.
+WalletConnect pairing requests Arc Mainnet. An installed browser wallet can connect on its current network; a separate **Switch to Arc** action requests a network change and, if needed, adds the reviewed Arc configuration. The returned chain ID is checked. No USDC balance or real payment is displayed until settlement is configured.
 
 The WalletConnect SDK persists protocol session material in browser storage. Enclave does not put API keys, prompts or provider credentials into that storage. Wallet state is never trusted as server-side authentication.
 
@@ -35,7 +35,7 @@ The current backend x402 v2 path supports EIP-3009 authorizations from externall
 ## Required deployment configuration
 
 - WalletConnect/Reown project ID and the `enclaveagent.tech` domain allowlist. The application metadata already uses that domain.
-- Selected EVM chain, RPC and confirmation policy; reviewed official USDC contract and its EIP-712 domain.
+- Arc Mainnet is selected; the official RPC and USDC EIP-712 domain pass the read-only preflight. Production RPC capacity, finality policy and transaction acceptance still need verification.
 - Deployed Enclave contracts, recipient and funded relay wallet, with their addresses published in the deployment record.
 - Server-side authentication and wallet ownership binding; an operator API key must not be shipped to public browsers.
 

@@ -1,9 +1,11 @@
 import { z } from "zod";
+import arc from "./arc-mainnet.json";
 
 export const walletProjectId = /^[a-f0-9]{32}$/i.test(import.meta.env["VITE_WALLETCONNECT_PROJECT_ID"] ?? "")
   ? String(import.meta.env["VITE_WALLETCONNECT_PROJECT_ID"]) : "";
-export const connectionNetworks = [{ id: 1, name: "Ethereum" }, { id: 8453, name: "Base" }, { id: 42161, name: "Arbitrum" }] as const;
-export const networkName = (id: number) => connectionNetworks.find(network => network.id === id)?.name ?? `Chain ${id}`;
+export const connectionNetworks = [{ id: arc.chainId, name: arc.name }] as const;
+const knownNetworks = [...connectionNetworks, { id: 1, name: "Ethereum" }, { id: 8453, name: "Base" }, { id: 42161, name: "Arbitrum" }, { id: 5042002, name: "Arc Testnet" }];
+export const networkName = (id: number) => knownNetworks.find(network => network.id === id)?.name ?? `Chain ${id}`;
 
 export interface BrowserProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;

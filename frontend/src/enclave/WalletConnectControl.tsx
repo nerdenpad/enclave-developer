@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { connectBrowserWallet, connectWalletConnect, type WalletAccount, type WalletConnection } from "./wallet-session";
 import { connectionNetworks, discoverWallets, fetchWalletDirectory, networkName, pairingLink, walletError, walletProjectId, type BrowserWallet, type ListedWallet } from "./wallets";
 import "./wallet.css";
+import arc from "./arc-mainnet.json";
 
 export function WalletConnectControl() {
   const [target, setTarget] = useState<HTMLElement | null>(null);
@@ -15,7 +16,8 @@ export function WalletConnectControl() {
   const [uri, setUri] = useState("");
   const [qr, setQr] = useState("");
   const [selected, setSelected] = useState<ListedWallet | null>(null);
-  const [chainId, setChainId] = useState(1);
+  const [chainId, setChainId] = useState(arc.chainId);
+  const [switching, setSwitching] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [directory, setDirectory] = useState<ListedWallet[]>([]);
@@ -118,6 +120,17 @@ export function WalletConnectControl() {
     try { await navigator.clipboard.writeText(uri); setNotice("Connection link copied. Paste it only into your wallet."); }
     catch { setError("Clipboard access is unavailable. Scan the QR code instead."); }
   }
+  async function switchNetwork() {
+    const selectedConnection = connection.current;
+    if (!selectedConnection?.switchToArc || switching) return;
+    setSwitching(true); setNotice("Approve the switch to Arc Mainnet in your wallet.");
+    try {
+      await selectedConnection.switchToArc();
+      if (alive.current && connection.current === selectedConnection) setNotice("Connected to Arc Mainnet. Real USDC payments are not enabled yet.");
+    } catch {
+      if (alive.current && connection.current === selectedConnection) setNotice("The network switch was not completed. You can try again from your wallet.");
+    } finally { if (alive.current) setSwitching(false); }
+  }
   if (!target) return null;
   const mobileLink = selected ? pairingLink(selected, uri) : null;
   const visibleWallets = wallets.filter(wallet => wallet.name.toLowerCase().includes(search.toLowerCase()));
@@ -128,9 +141,10 @@ export function WalletConnectControl() {
           {account ? `${account.address.slice(0, 6)}…${account.address.slice(-4)}` : "Connect wallet"}
         </button>
         {account && <button type="button" className="wallet-secondary" onClick={() => void disconnect()}>Disconnect wallet</button>}
+        {account && account.chainId !== arc.chainId && account.transport === "browser" && <button type="button" className="wallet-secondary" disabled={switching} onClick={() => void switchNetwork()}>{switching ? "Switching to Arc…" : "Switch to Arc"}</button>}
       </div>
       {account && <span className="wallet-network">{account.name} · {networkName(account.chainId)}</span>}
-      <span className="wallet-note">Wallet connection only · USDC payments coming next</span>
+      <span className="wallet-note">USDC on Arc · Payments not enabled yet</span>
       <span className="wallet-notice" role="status">{notice}</span>
     </div>
     <dialog className="wallet-dialog" data-react-controlled ref={dialog} aria-labelledby="wallet-dialog-title" aria-describedby="wallet-dialog-description"
@@ -158,7 +172,7 @@ export function WalletConnectControl() {
           {walletProjectId ? <>
             <label className="wallet-label" htmlFor="wallet-network">Connection network</label>
             <select id="wallet-network" className="wallet-input" value={chainId} onChange={event => { setChainId(Number(event.target.value)); setPage(1); setDirectory([]); setTotal(0); }}>{connectionNetworks.map(network => <option key={network.id} value={network.id}>{network.name}</option>)}</select>
-            <p className="wallet-note">This selects the wallet connection network. The USDC payment network has not been selected yet.</p>
+            <p className="wallet-note">Arc Mainnet is the selected payment network. Connecting does not enable payments; settlement is still being prepared.</p>
             <button type="button" className="wallet-qr-button" onClick={() => void connect(null)}>Connect with QR code</button>
             <p className="wallet-note" role="status">{loading ? "Loading wallets…" : directoryError || `${directory.length} wallets loaded${total ? ` · ${total} directory results` : ""}`}</p>
             <div className="wallet-list">{directory.map(wallet => <button className="wallet-choice" type="button" key={wallet.id} onClick={() => void connect(wallet)}><span>{wallet.name}</span><small>WalletConnect</small></button>)}</div>

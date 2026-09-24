@@ -15,6 +15,7 @@
     "build": "npm --prefix frontend run build",
     "build:node": "node scripts/build-node.mjs",
     "test:pilot": "node frontend/scripts/check-pilot.mjs",
+    "check:arc": "node frontend/scripts/check-arc.mjs",
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "npm --prefix _backend test",
     "test:frontend": "npm --prefix frontend test",

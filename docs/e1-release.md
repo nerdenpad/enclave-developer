@@ -16,21 +16,21 @@ E1 status: **not released**. A software pilot is hosted at https://enclaveagent.
 | Public HTTPS prompt flow | Hosted pilot, HTTPS and a separate non-admin pilot API key; local browser tests | Production user authentication and acceptance on the final infrastructure |
 | Composite attestation and protected key release | NEAR provider verification; software gateway | Provision a customer-controlled confidential VM; implement its hardware adapter, measurement-bound key release and encrypted recovery; verify negative cases on that hardware |
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the production signer and request path on the accepted hardware |
-| On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI | Choose chain and approved policies, deploy contracts, bind signer and record addresses; test anchoring and confirmations there |
-| USDC without duplicate charge/execution | MockUSDC, EIP-3009/x402 and recovery tests | Verify the real token domain/ABI, fund test wallets, implement the browser wallet authorization flow and exercise real-network restart/recovery |
+| On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI; Arc Mainnet selected | Approve policies, deploy contracts on Arc, bind signer and record addresses; test anchoring and confirmations there |
+| USDC without duplicate charge/execution | MockUSDC, EIP-3009/x402 and recovery tests; Arc USDC read-only domain preflight passes | Fund deployment/relay wallets, verify write-path compatibility, implement browser payment authorization and exercise real-network restart/recovery |
 | Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
 | Production mode | Correctly rejected by the current software adapter | Replace software custody and pass hardware/deployment acceptance; do not remove the guard as a shortcut |
 | Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |
 
 ## Infrastructure inputs
 
-As of 24 September 2026, a Debian 12 VPS (8 vCPU, 16 GB RAM) hosts the software pilot at `enclaveagent.tech`, with HTTPS and automatic certificate renewal. No confidential VM or selected real-USDC network has been supplied. NEAR remains the selected GPU provider. See [the single-server pilot runbook](../infra/pilot/README.md) for hosting without an E1 production claim.
+As of 24 September 2026, a Debian 12 VPS (8 vCPU, 16 GB RAM) hosts the software pilot at `enclaveagent.tech`, with HTTPS and automatic certificate renewal. Arc Mainnet is selected for real USDC; no funded deployment/relay wallets or confidential VM have been supplied. NEAR remains the selected GPU provider. See [the single-server pilot runbook](../infra/pilot/README.md) for hosting without an E1 production claim.
 
 The operator must supply:
 
 1. Production hosting and a customer-approved resource budget. The pilot already has a domain, DNS and TLS ingress.
 2. Confidential VM access for our own container workload, CPU evidence format/trust roots, measured image/configuration policy, a key derivation/release interface and durable encrypted storage. A managed inference API key alone does not supply these capabilities.
-3. The EVM network, reviewed RPC, required confirmation/finality policy, real USDC address and EIP-712 domain, funded deployment/relay wallets and governance addresses.
+3. Production RPC capacity and confirmation/finality policy for the selected Arc Mainnet, funded deployment/relay wallets and governance addresses. Public network/token parameters and the read-only preflight are recorded in [Arc deployment](arc-deployment.md).
 4. An authentication model for website users and receipt ownership. The current operator API-key field is a development facility.
 
 Do not put provider keys, deployer keys, CVM keys, RPC credentials or deployment profiles in Git. Existing `.env*.example` files are templates only.

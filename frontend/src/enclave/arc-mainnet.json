@@ -1,0 +1,15 @@
+{
+  "name": "Arc Mainnet",
+  "chainId": 5042,
+  "chainIdHex": "0x13b2",
+  "rpcUrl": "https://rpc.mainnet.arc.io",
+  "explorerUrl": "https://explorer.arc.io",
+  "nativeCurrency": { "name": "USDC", "symbol": "USDC", "decimals": 18 },
+  "usdc": {
+    "address": "0x3600000000000000000000000000000000000000",
+    "decimals": 6,
+    "eip712Name": "USDC",
+    "eip712Version": "2",
+    "domainSeparator": "0x940506929bba468048a19b567f4f0d534714bc06604b5c3017e5d16785ccdf84"
+  }
+}

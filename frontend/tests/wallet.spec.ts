@@ -9,12 +9,15 @@ async function installWallets(page: Page, mode: "normal" | "delayed" | "reject" 
       let approve: (() => void) | undefined;
       const listeners = new Map<string, (...args: unknown[]) => void>();
       const provider = {
-        request: async ({ method }: { method: string }) => {
+        request: async ({ method, params }: { method: string; params?: { chainId: string }[] }) => {
           calls.push({ name, method });
           if (method === "eth_requestAccounts" && mode === "reject") throw { code: 4001, message: "Do not expose wc:private-pairing-data" };
           if (method === "eth_requestAccounts" && mode === "delayed") await new Promise<void>(resolve => { approve = resolve; });
           if (["eth_requestAccounts", "eth_accounts"].includes(method)) return accounts;
           if (method === "eth_chainId") return chain;
+          if (method === "wallet_switchEthereumChain") {
+            chain = params![0]!.chainId; listeners.get("chainChanged")?.(chain); return null;
+          }
           throw new Error(`Unexpected wallet operation: ${method}`);
         },
         on: (event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); },
@@ -67,6 +70,22 @@ test("selected extension connects without signatures, updates account/network an
   await expect(page.locator(".wallet-control .wallet-trigger")).toContainText("0x3333");
   await page.locator(".wallet-control").getByRole("button", { name: "Disconnect wallet" }).click();
   await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeVisible();
+});
+
+test("Arc switching requires a separate click and never requests payment", async ({ page }) => {
+  await installWallets(page);
+  await page.goto("/dashboard");
+  await expect(page.getByText("USDC on Arc · Payments not enabled yet", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await page.getByRole("button", { name: "Fixture Alpha" }).click();
+  await expect(page.locator(".wallet-network")).toHaveText("Fixture Alpha · Ethereum");
+  const switchButton = page.getByRole("button", { name: "Switch to Arc", exact: true });
+  await switchButton.click();
+  await expect(page.locator(".wallet-network")).toHaveText("Fixture Alpha · Arc Mainnet");
+  await expect(switchButton).toHaveCount(0);
+  const calls = await page.evaluate(() => Reflect.get(window, "walletFixtureCalls")) as { method: string }[];
+  expect(calls.filter(call => call.method === "wallet_switchEthereumChain")).toHaveLength(1);
+  expect(calls.every(call => ["eth_requestAccounts", "eth_accounts", "eth_chainId", "wallet_switchEthereumChain"].includes(call.method))).toBe(true);
 });
 
 test("late extension approval cannot reconnect a cancelled request", async ({ page }) => {

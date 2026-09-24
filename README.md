@@ -65,5 +65,6 @@ The [CI workflow](.github/workflows/ci.yml) covers both applications, provider c
 - [Development and tests](docs/development.md)
 - [NEAR integration](_backend/docs/near-development.md)
 - [Single-server deployment](infra/pilot/README.md)
+- [Arc Mainnet configuration and payment prerequisites](docs/arc-deployment.md)
 - [Roadmap](docs/roadmap.md) and [E1 acceptance](docs/e1-release.md)
 - [Recorded demonstration](deliverables/README.md)
