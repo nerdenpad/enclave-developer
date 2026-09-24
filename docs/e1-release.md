@@ -1,6 +1,6 @@
 # E1 release acceptance
 
-Status: **not released**. The integrated development workspace is available locally. A GitHub push is source delivery, not deployment of a public service.
+E1 status: **not released**. A software pilot is hosted at https://enclaveagent.tech. It uses NEAR inference, software gateway keys and local-chain test settlement. A GitHub push is source delivery, not deployment by itself.
 
 ## Available now
 
@@ -13,7 +13,7 @@ Status: **not released**. The integrated development workspace is available loca
 
 | Requirement | Current evidence | Remaining work before release |
 | --- | --- | --- |
-| Public HTTPS prompt flow | Local connected dashboard and browser tests | Domain, hosting, TLS, authenticated user access and deployed end-to-end acceptance |
+| Public HTTPS prompt flow | Hosted pilot, HTTPS and a separate non-admin pilot API key; local browser tests | Production user authentication and acceptance on the final infrastructure |
 | Composite attestation and protected key release | NEAR provider verification; software gateway | Provision a customer-controlled confidential VM; implement its hardware adapter, measurement-bound key release and encrypted recovery; verify negative cases on that hardware |
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the production signer and request path on the accepted hardware |
 | On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI | Choose chain and approved policies, deploy contracts, bind signer and record addresses; test anchoring and confirmations there |
@@ -24,7 +24,7 @@ Status: **not released**. The integrated development workspace is available loca
 
 ## Infrastructure inputs
 
-No domain, confidential VM or selected USDC network was available as of 22 September 2026. NEAR remains the selected GPU provider; switching to Phala is not mandatory.
+As of 24 September 2026, a Debian 12 VPS (8 vCPU, 16 GB RAM) hosts the software pilot at `enclaveagent.tech`, with HTTPS and automatic certificate renewal. No confidential VM or selected real-USDC network has been supplied. NEAR remains the selected GPU provider. See [the single-server pilot runbook](../infra/pilot/README.md) for hosting without an E1 production claim.
 
 The operator must supply:
 

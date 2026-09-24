@@ -1,0 +1,23 @@
+[Unit]
+Description=Enclave pilot API (software gateway, NEAR inference)
+Requires=enclave-infra.service
+After=enclave-infra.service network-online.target
+
+[Service]
+User=enclave
+Group=enclave
+WorkingDirectory=/opt/enclave/_backend
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/node --env-file=.env.demo --import tsx apps/api/src/index.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/enclave/_backend/data /opt/enclave/_backend/work
+
+[Install]
+WantedBy=multi-user.target

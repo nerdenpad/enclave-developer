@@ -7,6 +7,8 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  // A normal VPS runs the standalone Node server; other build targets retain their defaults.
+  ...(process.env["ENCLAVE_DEPLOY_TARGET"] === "node" ? { nitro: { preset: "node-server" } } : {}),
   vite: {
     server: {
       proxy: {

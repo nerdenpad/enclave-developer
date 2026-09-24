@@ -1,0 +1,18 @@
+[Unit]
+Description=Enclave pilot private databases and development chain
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+Before=enclave-api.service enclave-worker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/enclave/_backend
+ExecStart=/usr/bin/docker compose --env-file .env.demo -p enclave-full-demo -f docker-compose.demo.yml -f ../infra/pilot/docker-compose.override.yml up -d --wait --wait-timeout 120
+ExecStop=/usr/bin/docker compose --env-file .env.demo -p enclave-full-demo -f docker-compose.demo.yml -f ../infra/pilot/docker-compose.override.yml stop
+TimeoutStartSec=180
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

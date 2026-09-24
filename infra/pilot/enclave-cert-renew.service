@@ -1,0 +1,7 @@
+[Unit]
+Description=Renew Enclave HTTPS certificate
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/enclave-certbot/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"

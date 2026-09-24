@@ -1,0 +1,23 @@
+[Unit]
+Description=Enclave pilot receipt anchorer and indexer
+Requires=enclave-infra.service
+After=enclave-infra.service enclave-api.service
+
+[Service]
+User=enclave
+Group=enclave
+WorkingDirectory=/opt/enclave/_backend
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/node --env-file=.env.demo --import tsx apps/worker/src/index.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/enclave/_backend/data /opt/enclave/_backend/work
+
+[Install]
+WantedBy=multi-user.target

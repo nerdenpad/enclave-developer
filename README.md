@@ -13,6 +13,19 @@ The connected Enclave frontend and backend in one repository. The dashboard send
 
 The two applications retain their own npm lockfiles and dependency trees. There are no nested Git repositories and no root npm workspace dependency hoisting.
 
+## Hosted pilot
+
+The software pilot is at **https://enclaveagent.tech**. The website and API run
+on a Debian VPS with automatic service startup and HTTPS certificate renewal.
+The gateway remains software-based and payments use test USDC on a private
+Anvil chain. Access to inference requires a separately issued pilot API key.
+See [the deployment runbook](infra/pilot/README.md) and [E1 acceptance](docs/e1-release.md).
+
+Deployment check on 24 September: public pages, authenticated workspace and
+TLS passed. End-to-end inference is blocked because NVIDIA NRAS returns HTTP
+403 to this VPS. The strict verifier remains enabled; no successful model
+response is claimed for this deployment yet.
+
 ## Local deployment
 
 Use Node.js 22.12+ or 24 LTS, npm, and a running local Docker engine.
