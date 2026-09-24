@@ -46,6 +46,8 @@ Open `http://127.0.0.1:5173/dashboard/`. Use `/api` as the gateway URL and the p
 
 A clean checkout starts with a local echo provider and test payments. Startup does not make a paid inference request. See the [development guide](docs/development.md) to configure NEAR, manage local services and run integration checks.
 
+The dashboard also supports browser wallet connections. Direct WalletConnect pairing and its searchable directory require a public Project ID configured before building. Connecting a wallet does not enable real-USDC payments or replace workspace authentication. See [wallet setup and payment scope](docs/wallet-payments.md).
+
 ## Verification
 
 ```sh

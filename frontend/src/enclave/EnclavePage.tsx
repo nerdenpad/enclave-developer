@@ -4,6 +4,7 @@ import homeStyles from "./home-reference.css?raw";
 import "./dashboard.css";
 import { VerifyReceiptPage } from "./VerifyReceiptPage";
 import { DeploymentStatusPage } from "./DeploymentStatusPage";
+import { WalletConnectControl } from "./WalletConnectControl";
 
 const pages = import.meta.glob("./pages/*.html", {
   query: "?raw",
@@ -83,6 +84,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
     <>
       {path === "/" ? <style dangerouslySetInnerHTML={{ __html: homeStyles }} /> : null}
       <div id="site-document" style={{ display: "contents" }} dangerouslySetInnerHTML={{ __html: markup }} />
+      {path === "/dashboard/" ? <WalletConnectControl /> : null}
     </>
   );
 }

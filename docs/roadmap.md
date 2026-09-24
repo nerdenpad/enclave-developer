@@ -11,7 +11,7 @@ Status reviewed on 24 September 2026. Milestones are tied to acceptance evidence
 | Hosted inference acceptance | Blocked | Successful strict CPU/GPU verification, model response and independently checked receipt from the hosted path |
 | Confidential gateway and key custody | Pending infrastructure and implementation | Accepted hardware measurements, protected key release, tamper rejection and encrypted restart recovery |
 | Public-chain settlement | Pending network selection and acceptance | Reviewed contracts, real USDC, browser wallet authorization and restart/recovery tests without duplicate charge or execution |
-| Wallet connections | Planned after funding and domain migration | Searchable chooser with at least 50 compatible wallets, desktop/mobile connection and verified USDC authorization; see [scope and acceptance](wallet-payments.md) |
+| Wallet connections | Browser connection implemented; remote setup pending | Direct WalletConnect integration with a custom chooser; Project ID and live 50-wallet catalog acceptance still required. Real-USDC authorization awaits network selection; see [scope and acceptance](wallet-payments.md) |
 | Production user access | Pending | Deployed user authentication and receipt ownership checks |
 | E1 release | Not released | All eight requirements in the [acceptance matrix](e1-release.md) pass on the final deployment |
 

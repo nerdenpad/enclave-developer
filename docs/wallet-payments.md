@@ -1,8 +1,20 @@
 # Wallet connections and real USDC
 
-Planned scope, not an implemented feature. Enable after the operator's funding and domain migration milestone, with the settlement deployment accepted separately.
+The final domain is **enclaveagent.tech**. Wallet connection is implemented separately from payments. Real-USDC settlement remains pending the customer's network selection and contract deployment.
 
-## User flow
+## Implemented connection
+
+The dashboard uses the direct WalletConnect Sign Client, with an Enclave-owned dialog and QR renderer. Reown AppKit is not installed. Browser extensions are discovered through EIP-6963, with a legacy provider fallback. Connection only reads accounts and chain ID; it does not request a payment signature, send a transaction or authenticate a gateway user.
+
+Account and network changes update the browser-wallet display. A WalletConnect approval change invalidates the session and requires reconnection. Cancellation ignores late approvals and closes any late remote session. The dialog supports keyboard navigation, Escape and focus restoration.
+
+Browser extensions work without a Project ID. To enable remote pairing and the catalog, create a WalletConnect/Reown project, allow the final domain, and set the public `VITE_WALLETCONNECT_PROJECT_ID` in `frontend/.env.local` before building. See [the Explorer API requirements](https://docs.reown.com/cloud/explorer). No project was supplied at implementation time; live relay pairing and the actual 50-wallet catalog still need acceptance.
+
+The connection chooser offers Ethereum, Base and Arbitrum for pairing. These choices do not configure the payment network. No USDC balance or real payment is displayed until that deployment is configured.
+
+The WalletConnect SDK persists protocol session material in browser storage. Enclave does not put API keys, prompts or provider credentials into that storage. Wallet state is never trusted as server-side authentication.
+
+## Target payment flow
 
 1. Select **Connect wallet**, choose a wallet or scan a WalletConnect QR code on mobile.
 2. Connect to the supported payment network. Display the account, network and USDC balance.
@@ -14,7 +26,7 @@ Connection alone does not authorize payment or authenticate a server-side user s
 
 ## Wallet coverage
 
-Use Reown AppKit with WalletConnect and browser wallet discovery. The chooser must offer at least 50 distinct wallets compatible with the selected EVM network, with search, QR connection and mobile links. Prioritize common wallets such as MetaMask, Trust Wallet, Rainbow, Rabby and OKX where compatible.
+The custom chooser loads the official WalletConnect Explorer API in pages of 100, filtered by connection network and Sign v2 support, with search, pagination, QR connection and mobile links. The acceptance target remains at least 50 distinct compatible wallets. Prioritize common wallets such as MetaMask, Trust Wallet, Rainbow, Rabby and OKX where compatible.
 
 The wallet directory is not evidence that every listed wallet supports our payment signature. Before release, record the actual compatible wallet list and a connection/signature compatibility matrix. Count distinct wallets, not extension and mobile variants of one wallet. Test the main desktop and mobile journeys and publish any exceptions.
 
@@ -22,7 +34,7 @@ The current backend x402 v2 path supports EIP-3009 authorizations from externall
 
 ## Required deployment configuration
 
-- Reown project ID, application metadata and the final domain allowlist.
+- WalletConnect/Reown project ID and the `enclaveagent.tech` domain allowlist. The application metadata already uses that domain.
 - Selected EVM chain, RPC and confirmation policy; reviewed official USDC contract and its EIP-712 domain.
 - Deployed Enclave contracts, recipient and funded relay wallet, with their addresses published in the deployment record.
 - Server-side authentication and wallet ownership binding; an operator API key must not be shipped to public browsers.
@@ -33,4 +45,4 @@ Verify successful payment, user rejection, insufficient funds, unsupported netwo
 
 Test with a test token first, then perform an explicitly authorized small real-USDC acceptance transaction. A wallet modal or new domain alone does not enable production payments or complete E1.
 
-References: [Reown React installation](https://docs.reown.com/appkit/react/core/installation), [wallet chooser options](https://docs.reown.com/appkit/react/core/options).
+References: [WalletConnect Sign Client](https://github.com/WalletConnect/walletconnect-monorepo/tree/v2.0/packages/sign-client), [Explorer API](https://docs.reown.com/cloud/explorer), [EIP-6963 discovery](https://eips.ethereum.org/EIPS/eip-6963).
