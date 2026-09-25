@@ -25,15 +25,23 @@ export async function signLoginMessage(message: string, address: string, request
 async function authRequest(path: string, body?: unknown, token?: string) {
   const response = await fetch(`/api/v1/auth/wallet/${path}`, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
     headers: { "content-type": "application/json", ...(token ? { "x-api-key": token } : {}) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15_000) });
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(path === "config" ? 5_000 : 15_000) });
   if (!response.ok) throw Error(response.status === 429 ? "Too many login attempts. Please wait a few minutes." : "Wallet login failed or expired. Please try again.");
   return response.json() as Promise<unknown>;
 }
 export async function walletLoginAvailable(): Promise<boolean> {
-  try {
-    const config = z.object({ enabled: z.literal(true), origin: z.string(), chainId: z.literal(5042) }).parse(await authRequest("config"));
-    return config.origin === location.origin;
-  } catch { return false; }
+  // Retry only the read-only capability probe after a transport failure. Login
+  // challenges, signatures, payments and other mutations are never retried here.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const config = z.object({ enabled: z.literal(true), origin: z.string(), chainId: z.literal(5042) }).parse(await authRequest("config"));
+      return config.origin === location.origin;
+    } catch (error) {
+      if (attempt === 2 || !(error instanceof Error) || !["TypeError", "TimeoutError", "AbortError"].includes(error.name)) return false;
+      await new Promise(resolve => setTimeout(resolve, 1_000 * (attempt + 1)));
+    }
+  }
+  return false;
 }
 export async function logoutWallet(token: string) { await authRequest("logout", {}, token); }
 export async function resumeWallet(wallet: WalletConnection) {
