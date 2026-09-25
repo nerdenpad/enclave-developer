@@ -1,29 +1,27 @@
 # GitHub presentation
 
-Prepared content for the current repository and a future Enclave organization profile.
+Public pages follow the same shape as [UseCert](https://github.com/UseCert): a short profile, a repository README that states the pilot limits in the opening, and an About box that matches that wording.
 
 ## Repository
 
-The root [README](../../README.md) is the public entry point. Detailed setup is in [Development](../development.md), with separate [Architecture](../architecture.md) and [Roadmap](../roadmap.md) documents.
+The root [README](../../README.md) is the public entry point. Detailed setup stays in [Development](../development.md), with [Architecture](../architecture.md) and [Roadmap](../roadmap.md) beside it.
 
-Suggested About description:
+About description:
 
-> Inference with signed receipts, attestation checks and on-chain verification. Software pilot.
+> Inference with signed receipts, attestation checks and on-chain verification. Gateway keys stay in software, and the status page says what a signature does not prove. Software pilot.
 
 Website: https://enclaveagent.tech
 
-Topics: `inference`, `attestation`, `confidential-computing`, `receipts`, `solidity`, `typescript`.
+Topics: `inference`, `attestation`, `confidential-computing`, `receipts`, `solidity`, `typescript`, `react`.
 
-These are suggested metadata, not changes already applied to GitHub.
+## Profile
 
-## Organization profile
+[profile-README.md](profile-README.md) is the overview copied to the public profile README. A user account shows it from a repository named after the account (`nerdenpad/nerdenpad`, `README.md` at the root). An organization would show the same file from `.github` at `profile/README.md`. Putting that path inside this repository does not create the overview.
 
-The [profile draft](profile-README.md) is ready to copy to `profile/README.md` in an organization's public `.github` repository once the Enclave organization is chosen. Putting it in this project's `.github/profile/` would not create an organization overview.
-
-Pin the combined repository and use the existing Enclave logo as the organization avatar. Keep the frontend and backend together on `main`. Separate repositories are only needed when they have an independent development and release lifecycle.
+Pin `enclave-developer`. Keep the frontend and backend together on `main`.
 
 ## At release
 
-Update the dated pilot status in the repository README, profile draft, roadmap and E1 acceptance document from the same deployment evidence. Publish a tagged release only when its stated acceptance criteria pass. Attach the matching walkthrough and link the deployed network, contracts, model and policy versions.
+Update the dated pilot status in the repository README, the profile README, the roadmap and the E1 acceptance document from the same deployment evidence. Publish a tagged release only when its stated acceptance criteria pass.
 
-The public view should distinguish shipped behavior, current limitations and planned work. License terms and a private security-reporting channel still need owner decisions before a public source release. No license or contact address has been invented in this draft.
+The public view should distinguish shipped behavior, current limitations and planned work. No license has been added.

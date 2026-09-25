@@ -2,38 +2,66 @@
 
 Inference with signed receipts, attestation checks and on-chain verification.
 
-[Website](https://enclaveagent.tech) · [Dashboard](https://enclaveagent.tech/dashboard) · [Verify a receipt](https://enclaveagent.tech/verify) · [Deployment status](https://enclaveagent.tech/status) · [Roadmap](docs/roadmap.md)
+A completed request carries a signed receipt. It binds the model, the code, the input,
+the output and an attestation reference. You export it from the dashboard, check the
+signature in the browser, and ask the configured contracts whether that receipt was
+accepted and anchored.
 
-Enclave connects a model request to a signed record of its model, code, input, output and attestation reference. The dashboard handles encrypted requests, payment confirmation and receipt history. A separate verification page checks exported receipts without a workspace account.
+Underneath, the hosted gateway still runs on an ordinary VPS. NEAR is the selected
+remote GPU provider, and gateway keys stay in software on that VPS. Payments on the
+pilot are MockUSDC on a private Anvil chain, not USDC. **A valid signature says the
+configured signer signed those hashes** — the [status page](https://enclaveagent.tech/status)
+says what that does not prove.
 
-## Current deployment
+> ### This is a software pilot
+>
+> E1 is **not released**. The site is [enclaveagent.tech](https://enclaveagent.tech).
+> As of 25 September 2026, hosted inference is blocked: NVIDIA's attestation service
+> returns HTTP 403 to the VPS, and strict verification stays on. A local walkthrough
+> with a signed receipt is not evidence that the hosted path completed inference.
+>
+> What is live, what is blocked and what has to be true before release is published
+> in the [roadmap](docs/roadmap.md), without dates and with a way to check each claim.
 
-**Software pilot. E1 is not released.** The website and API run on a standard VPS. NEAR is the selected remote GPU provider; gateway keys and the receipt signer remain in software on the VPS. Payments use MockUSDC on a private Anvil chain, not real USDC.
+## Links
 
-As of 24 September 2026, the public pages, authenticated workspace and HTTPS checks pass. Hosted inference is blocked: NVIDIA's attestation service returns HTTP 403 to the VPS. Verification remains enforced. The earlier [local demonstration](deliverables/README.md) includes a successful NEAR request; it is not evidence of successful inference on the hosted deployment.
+| | |
+|---|---|
+| Site | [enclaveagent.tech](https://enclaveagent.tech) |
+| Milestones | [Roadmap](docs/roadmap.md) |
+| Dashboard | [enclaveagent.tech/dashboard](https://enclaveagent.tech/dashboard) |
+| Verify a receipt | [enclaveagent.tech/verify](https://enclaveagent.tech/verify) |
+| Deployment status | [enclaveagent.tech/status](https://enclaveagent.tech/status) |
+| X | [@enclave_arc](https://x.com/enclave_arc) |
+| Telegram | [t.me/enclavearc](https://t.me/enclavearc) |
 
-## How it works
-
-1. The browser encrypts a prompt for the gateway and asks the user to confirm the development payment.
-2. The gateway checks the request and payment state. With the NEAR integration selected, it verifies remote CPU/GPU evidence and the provider connection before sending the prompt.
-3. A successful request returns encrypted output and a signed inference receipt. A worker anchors the receipt through the configured contracts.
-4. The user can export the receipt and check its signature in the browser. Optional RPC checks evaluate contract acceptance, model policy and a supplied anchor transaction.
-
-The software gateway can access the prompt and its signing keys. Remote GPU attestation does not make this VPS confidential. Receipt signature verification also does not independently verify hardware evidence or prove payment. See [architecture and trust boundaries](docs/architecture.md).
-
-## Repository
+## What is in this repository
 
 The frontend, backend and contracts share `main`.
 
 | Directory | Contents |
-| --- | --- |
-| [frontend](frontend/) | React dashboard, receipt verifier and deployment status page |
+|---|---|
+| [frontend](frontend/) | React dashboard, receipt verifier and deployment status |
 | [_backend](_backend/) | Hono API, workers, PostgreSQL, provider adapters and Solidity contracts |
 | [infra/pilot](infra/pilot/) | Debian deployment, HTTPS and service configuration |
 | [docs](docs/) | Architecture, development and release requirements |
 | [deliverables](deliverables/) | Recorded local walkthrough and verification notes |
 
-## Run locally
+## Design decisions worth knowing
+
+**Rejected evidence stops the request.** If remote CPU or GPU verification is unavailable
+or the evidence is rejected, the gateway does not pick an unverified fallback. The
+request ends.
+
+**A signature is not a hardware proof.** A valid receipt shows that the configured signer
+signed those hashes. It does not, by itself, prove the signer ran in a TEE, or that a
+payment cleared. See [architecture and trust boundaries](docs/architecture.md).
+
+**The status page does not invent a deployment.** Software key custody is named as
+software. Settlement is named as MockUSDC on chain 31337. Where hosted inference has
+not completed, that is what the deployment record says.
+
+## Development
 
 Requires Node.js 22.12+ and a running Docker engine.
 
@@ -42,13 +70,15 @@ npm run setup
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173/dashboard/`. Use `/api` as the gateway URL and the private `DEMO_API_KEY` generated in `_backend/.env.demo`. The browser holds this key in memory.
+Open `http://127.0.0.1:5173/dashboard/`. Use `/api` as the gateway URL and the private
+`DEMO_API_KEY` generated in `_backend/.env.demo`. The browser holds this key in memory.
 
-A clean checkout starts with a local echo provider and test payments. Startup does not make a paid inference request. See the [development guide](docs/development.md) to configure NEAR, manage local services and run integration checks.
+A clean checkout starts with a local echo provider and test payments. Startup does not
+make a paid inference request. See the [development guide](docs/development.md) for NEAR,
+local services and integration checks.
 
-The dashboard also supports browser wallet connections. Direct WalletConnect pairing and its searchable directory require a public Project ID configured before building. Connecting a wallet does not enable real-USDC payments or replace workspace authentication. See [wallet setup and payment scope](docs/wallet-payments.md).
-
-## Verification
+Connecting a wallet does not enable real-USDC payments and does not replace workspace
+authentication. See [wallet setup and payment scope](docs/wallet-payments.md).
 
 ```sh
 npm run typecheck
@@ -57,14 +87,6 @@ npm run test:browser
 npm run build
 ```
 
-The [CI workflow](.github/workflows/ci.yml) covers both applications, provider checks, contracts and browser flows. Browser tests use fixtures; hardware and paid-provider acceptance are separate checks. [E1 acceptance](docs/e1-release.md) lists the evidence required for release.
-
-## Documentation
-
-- [Architecture and trust boundaries](docs/architecture.md)
-- [Development and tests](docs/development.md)
-- [NEAR integration](_backend/docs/near-development.md)
-- [Single-server deployment](infra/pilot/README.md)
-- [Arc Mainnet configuration and payment prerequisites](docs/arc-deployment.md)
-- [Roadmap](docs/roadmap.md) and [E1 acceptance](docs/e1-release.md)
-- [Recorded demonstration](deliverables/README.md)
+The [CI workflow](.github/workflows/ci.yml) covers both applications, provider checks,
+contracts and browser flows. Browser tests use fixtures. Hardware and paid-provider
+acceptance are separate checks in [E1 acceptance](docs/e1-release.md).
