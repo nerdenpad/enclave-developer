@@ -103,7 +103,7 @@ export function mountDashboard(): () => void {
     const local = canSettleLocally(health);
     const label = near ? "NEAR GPU · DEVELOPMENT GATEWAY" : echo ? "LOCAL ECHO · DEVELOPMENT" : "MODEL ENDPOINT · DEVELOPMENT GATEWAY";
     text("#environment-badge", label);
-    text("#environment-description", near ? "Verified remote GPU inference. The gateway and its keys run in software." : echo ? "Real gateway, database and receipt signatures. The echo provider is a development fixture." : "Model inference through an OpenAI-compatible endpoint. The gateway and its keys run in software; this adapter does not verify provider hardware.");
+    text("#environment-description", near ? "NEAR adapter configured; each request requires hardware verification. Gateway keys run in software." : echo ? "Real gateway, database and receipt signatures. The echo provider is a development fixture." : "Model inference through an OpenAI-compatible endpoint. The gateway and its keys run in software; this adapter does not verify provider hardware.");
     text("#connection-status", `Connected · ${client!.baseUrl}`);
     $("#connection-status").dataset["connected"] = "true";
     text("#connection-note", `Chain ${health.chainId} · ${health.paymentMode} payments · gateway ${health.teeMode}`);

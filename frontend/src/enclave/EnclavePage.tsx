@@ -60,7 +60,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
     let disposeDashboard: (() => void) | undefined;
     void (async () => {
       // Navigation effects must not delay authentication or the workspace API.
-      const decorations = loadScript("/site.js").catch(console.error);
+      const decorations = loadScript("/site.js?v=20260925").catch(console.error);
       if (cancelled) return;
       if (path === "/dashboard/") {
         const { mountDashboard } = await import("./dashboard");
