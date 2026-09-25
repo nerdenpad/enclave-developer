@@ -23,7 +23,7 @@ export class PostgresWalletLoginStore implements WalletLoginStore {
       await tx`delete from wallet_login_sessions where expires_at <= now()`;
       const [count] = await tx`select count(*)::int as n from wallet_login_challenges where address = ${c.address}`;
       if (Number(count?.n) >= 5) throw new AppError("LOGIN_RATE_LIMIT", "Wait before requesting another login", 429);
-      await tx`insert into wallet_login_challenges(id,address,message,expires_at) values (${c.id},${c.address},${c.message},${c.expiresAt})`;
+      await tx`insert into wallet_login_challenges(id,address,message,expires_at) values (${c.id},${c.address},${c.message},${c.expiresAt.toISOString()})`;
     });
   }
   async get(id: string) {
@@ -45,7 +45,7 @@ export class PostgresWalletLoginStore implements WalletLoginStore {
       }
       const [count] = await tx`select count(*)::int as n from wallet_login_sessions where address=${c.address} and expires_at > now()`;
       if (Number(count?.n) >= 10) throw new AppError("LOGIN_SESSION_LIMIT", "Sign out another session or wait for it to expire", 429);
-      await tx`insert into wallet_login_sessions(token_hash,owner_hash,address,expires_at) values (${tokenHash},${owner.owner_hash},${c.address},${expiresAt})`;
+      await tx`insert into wallet_login_sessions(token_hash,owner_hash,address,expires_at) values (${tokenHash},${owner.owner_hash},${c.address},${expiresAt.toISOString()})`;
       return true;
     });
   }

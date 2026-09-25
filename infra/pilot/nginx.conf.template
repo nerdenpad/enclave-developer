@@ -25,6 +25,15 @@ server {
     add_header Strict-Transport-Security "max-age=86400" always;
 
     location ~ /\. { return 404; }
+    location ^~ /assets/ {
+        root /var/www/enclave-public;
+        try_files $uri =404;
+        expires 1y;
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_types application/javascript text/javascript text/css image/svg+xml;
+    }
     location /api/ {
         limit_req zone=enclave_api burst=30 nodelay;
         limit_req_status 429;

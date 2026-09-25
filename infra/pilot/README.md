@@ -22,7 +22,11 @@ no GPUs on this host. A single host is not highly available.
 4. Privately provision `_backend/.env.near` with the selected NEAR credential,
    model, direct endpoint, Linux verifier path and reviewed policy path.
    Set permissions to `0600`; never put credentials in a frontend build.
-5. Build with `npm run build:node` and run `npm run typecheck`.
+5. Build with `npm run build:node` and run `npm run typecheck`. As root, run
+   `bash infra/pilot/publish-assets.sh` after each build, before switching the
+   web release. For a staged build, pass its absolute `public/assets` directory.
+   nginx serves compressed public assets directly; retain previous hashed files
+   for open tabs and rollback. Never copy environment files into this directory.
 6. From `_backend`, bootstrap this fresh, private development environment using
    `node --import tsx scripts/prepare-demo.ts --near-env .env.near`. Docker
    access is required. This command refuses to overwrite unmanaged state.
@@ -52,9 +56,18 @@ The API runs with `NODE_ENV=development` and the existing production guard.
 The website is a built Node server, not a public Vite development server.
 nginx provides HTTPS, same-origin `/api`, request/body/connection limits and
 no-store responses. Inference requires a private client API key held only in
-browser memory. There is no public self-service signup or real USDC checkout.
+browser memory. Optional public wallet sign-in is available after migration and
+`WALLET_AUTH_ORIGIN=https://enclaveagent.tech` configuration; it opens a private,
+read-only pilot workspace and does not grant inference credit or real checkout.
+See [wallet sign-in](../../docs/wallet-payments.md).
 
 ## Acceptance
+
+`node frontend/scripts/check-wallet-login.mjs` checks the published wallet login
+using a fresh, unfunded EOA fixture. It verifies signature login, empty owner
+history, no browser credential storage, blocked pilot spending and revocation
+after an account change. It creates no chain transaction or inference request.
+This fixture does not replace approval testing in actual wallet applications.
 
 Run `npm run test:pilot` with `PILOT_URL` set to the HTTPS origin. It verifies
 the home/dashboard/verify/status pages, trusted TLS, browser cryptography and

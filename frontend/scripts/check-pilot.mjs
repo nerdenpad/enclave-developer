@@ -36,6 +36,9 @@ try {
   expect(unauthorized.status()).toBe(401);
   await page.locator('.dashboard-main[data-workspace-ready="true"]').waitFor();
   if (apiKey) {
+    const loginConfig = await context.request.get(target.origin + "/api/v1/auth/wallet/config");
+    if (loginConfig.ok() && (await loginConfig.json()).enabled) await expect(page.locator("#wallet-login-panel")).toBeVisible();
+    await page.locator("#operator-access").evaluate(details => { details.open = true; });
     await page.locator("#api-key").fill(apiKey);
     await page.locator("#connect-gateway").click();
     await expect(page.locator("#connection-status")).toContainText("Connected", { timeout: 30_000 });

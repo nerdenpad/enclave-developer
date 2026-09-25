@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { privateKeyToAccount } from "viem/accounts";
 import { WALLET_AUTH_SQL, createDb } from "@enclave/db";
 import { sha256Hex } from "@enclave/core";
@@ -15,6 +16,8 @@ let testSql: ReturnType<typeof createDb>["sql"] | undefined;
 try {
   await admin`create schema ${admin(schema)}`;
   testSql = postgres(url, { max: 4, connection: { search_path: schema }, onnotice: () => {} });
+  // createDb also initializes Drizzle, which replaces postgres-js date serializers.
+  drizzle(testSql);
   await testSql.unsafe("CREATE TABLE api_keys (key_hash text PRIMARY KEY,label text NOT NULL,role text NOT NULL,usdc_balance bigint NOT NULL)");
   await testSql.unsafe(WALLET_AUTH_SQL);
   const login = new WalletLogin("https://enclaveagent.tech", new PostgresWalletLoginStore(testSql));

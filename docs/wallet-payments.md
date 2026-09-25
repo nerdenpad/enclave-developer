@@ -22,6 +22,8 @@ The backend verifies the signature against its stored message and atomically con
 
 Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions on the pilot can inspect their own workspace; inference and payments require the separately configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. This is not evidence of completed paid or hardware acceptance.
 
+Published and checked on 25 September 2026 at `enclaveagent.tech`: an unfunded browser wallet fixture signed in, loaded its empty workspace, could not submit a pilot settlement, and lost access after an account change. The PostgreSQL integration covered concurrent replay, stable ownership across logins, separate identities, expiry and revocation. The hosted WalletConnect check still returned 77 catalog entries and a working QR relay. Approval in actual wallet apps and real payments remain separate acceptance steps.
+
 Run the additive database migration before setting `WALLET_AUTH_ORIGIN=https://enclaveagent.tech` on the API. Without this setting, public login is disabled. Login requests require the matching Origin header and have a 4 KB body limit, a 120-request/minute per-process ceiling, five outstanding challenges per address and ten active sessions per address. Multi-replica or high-volume deployments need a shared perimeter rate limiter. Test PostgreSQL behavior with `node --env-file=.env.demo --import tsx scripts/test-wallet-login.ts` from `_backend`; it creates and removes only a random test schema.
 
 ## Payment release configuration
