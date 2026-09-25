@@ -59,13 +59,16 @@ export function EnclavePage({ pathname }: { pathname: string }) {
     let cancelled = false;
     let disposeDashboard: (() => void) | undefined;
     void (async () => {
-      await loadScript("/site.js");
+      // Navigation effects must not delay authentication or the workspace API.
+      const decorations = loadScript("/site.js").catch(console.error);
       if (cancelled) return;
       if (path === "/dashboard/") {
         const { mountDashboard } = await import("./dashboard");
         if (cancelled) return;
         disposeDashboard = mountDashboard();
       }
+      await decorations;
+      if (cancelled) return;
       if (location.hash) {
         requestAnimationFrame(() =>
           document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView(),

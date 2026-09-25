@@ -4,5 +4,6 @@
 @media(max-width:809px){.dashboard-main .connection-panel{order:1}.dashboard-main .dash-nav{order:2}.dashboard-main .dash-view{order:3}.dashboard-main .compute-topology{order:4}.dashboard-main .dash-metrics{order:5}.dashboard-main .dash-footnote{order:6}}
 .en-dialog[open]{margin:auto;max-height:calc(100dvh - 64px);overflow:auto}.receipt-dialog #receipt-fields{font-size:12px}.receipt-dialog #receipt-fields dd{font-size:11px;line-height:1.5}.receipt-dialog #receipt-integrity{font-size:13px;line-height:1.5}
 .dashboard-main,.en-dialog{--muted:#5e6f93}.dashboard-main #inference-output{max-height:320px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
-.deployment-notice { position: relative; z-index: 3; padding: 10px 20px; text-align: center; font: 13px/1.5 Arial, sans-serif; color: #e5e7eb; background: #192029; }
+.deployment-notice { position: fixed; inset-inline: 0; bottom: 0; z-index: 1000; padding: 10px 20px; text-align: center; font: 13px/1.5 Arial, sans-serif; color: #e5e7eb; background: #192029; }
 .deployment-notice a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+body:has(.deployment-notice) { padding-bottom: 42px; }
