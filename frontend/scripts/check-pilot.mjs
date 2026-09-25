@@ -1,9 +1,10 @@
-import { chromium, expect } from "@playwright/test";
+import { chromium, expect as baseExpect } from "@playwright/test";
 import { existsSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const target = new URL(process.env.PILOT_URL || "https://enclaveagent.tech");
+const expect = baseExpect.configure({ timeout: 30_000 });
 if (target.protocol !== "https:" || target.username || target.password || target.search || target.hash || target.pathname !== "/") throw Error("PILOT_URL must be a credential-free HTTPS origin.");
 const apiKey = process.env.PILOT_API_KEY;
 const infer = process.argv.includes("--run-inference");

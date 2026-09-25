@@ -34,7 +34,16 @@ server {
         gzip_min_length 1024;
         gzip_types application/javascript text/javascript text/css image/svg+xml;
     }
+    location ~ ^/(site\.js|enclave\.css|favicon\.ico|robots\.txt)$ {
+        root /var/www/enclave-public;
+        try_files $uri =404;
+        expires 1h;
+        gzip on;
+        gzip_vary on;
+        gzip_types text/css application/javascript text/javascript;
+    }
     location /api/ {
+        # Browser Origin is passed through for scoped wallet login.
         limit_req zone=enclave_api burst=30 nodelay;
         limit_req_status 429;
         limit_conn enclave_connections 20;

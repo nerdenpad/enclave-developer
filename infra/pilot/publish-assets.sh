@@ -10,4 +10,9 @@ install -d -m 755 /var/www/enclave-public /var/www/enclave-public/assets
 cp -a "$source_dir"/. /var/www/enclave-public/assets/
 find /var/www/enclave-public/assets -type d -exec chmod 755 {} +
 find /var/www/enclave-public/assets -type f -exec chmod 644 {} +
+for name in site.js enclave.css favicon.ico robots.txt; do
+  file="$(dirname "$source_dir")/$name"
+  test -f "$file"
+  install -m 644 "$file" "/var/www/enclave-public/$name"
+done
 # Retain old content-addressed files for already-open tabs and rollback.
