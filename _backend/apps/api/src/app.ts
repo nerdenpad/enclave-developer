@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { walletLoginRoutes, type WalletLogin } from "./wallet-auth.js";
 import { cors } from "hono/cors";
 import { trpcServer } from "@hono/trpc-server";
 import { z } from "zod";
@@ -46,9 +47,20 @@ async function readJson(c: Context): Promise<unknown> {
   catch { throw new ValidationError({ body: "Invalid JSON" }); }
 }
 
-export function createApp(gateway: EnclaveGateway, log: Logger, agentRuntime?: AgentRuntime) {
+export function createApp(gateway: EnclaveGateway, log: Logger, agentRuntime?: AgentRuntime, walletLogin?: WalletLogin) {
   const app = new Hono();
   app.use("*", cors());
+  // Public wallet sessions cannot spend pilot funds or call admin/agent tools.
+  app.use("*", async (c, next) => {
+    if ((c.req.header("x-api-key") ?? "").startsWith("enws_") && c.req.method !== "GET" && c.req.path !== "/v1/auth/wallet/logout") {
+      const health = gateway.health();
+      const allowed = ["/v1/session", "/v1/inference", "/v1/x402/settle"];
+      if (health.chainId !== 5042 || health.paymentMode !== "authorized" || !allowed.includes(c.req.path)) {
+        throw new AppError("WALLET_ACTION_UNAVAILABLE", "This action is unavailable for public wallet sessions on this deployment", 403);
+      }
+    }
+    await next();
+  });
   app.use("/v1/payments/:id", async (c, next) => {
     if (!z.string().uuid().safeParse(c.req.param("id")).success) throw new ValidationError({ id: "Expected UUID" });
     await next();
@@ -86,6 +98,8 @@ export function createApp(gateway: EnclaveGateway, log: Logger, agentRuntime?: A
   });
 
   app.get("/health", (c) => { c.header("Cache-Control", "no-store"); return c.json(gateway.health()); });
+  if (walletLogin) app.route("/v1/auth/wallet", walletLoginRoutes(walletLogin));
+  else app.get("/v1/auth/wallet/config", c => c.json({ enabled: false }));
   app.get("/v1/workspace", async (c) => {
     c.header("Cache-Control", "no-store");
     const parsed = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(),

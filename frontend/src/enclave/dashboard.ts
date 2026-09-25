@@ -1,4 +1,8 @@
 import { EnclaveClient, ApiError, canSettleLocally, type Health, type Workspace, type WorkspaceReceipt, type Model, type Policies, type PreparedInference, type VerifiedInference, type InferenceStep } from "./api";
+import { configuredArcPaymentPolicy } from "./arc-payment";
+import { paymentWallet, onWalletChanged } from "./wallet-runtime";
+import { loginWallet, logoutWallet, walletLoginAvailable } from "./wallet-auth";
+import arc from "./arc-mainnet.json";
 
 const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const short = (value: string) => value.length > 22 ? `${value.slice(0, 12)}…${value.slice(-6)}` : value;
@@ -30,6 +34,10 @@ export function mountDashboard(): () => void {
   const text = (selector: string, value: string) => { $(selector).textContent = value; };
   const on = (selector: string, event: string, handler: (event: Event) => void) => $(selector).addEventListener(event, handler, { signal: life.signal });
   let client: EnclaveClient | null = null;
+  let walletToken: string | null = null;
+  let loginGeneration = 0;
+  let loginExpiry: ReturnType<typeof setTimeout> | undefined;
+  let signingIn = false;
   let health: Health | null = null;
   let workspace: Workspace | null = null;
   let models: Model[] = [];
@@ -191,6 +199,8 @@ export function mountDashboard(): () => void {
     notify("Response decrypted. Input, output and receipt signature verified.");
   }
   function clearWorkspace() {
+    loginGeneration++; clearTimeout(loginExpiry);
+    if (walletToken) { void logoutWallet(walletToken).catch(() => {}); walletToken = null; }
     connectionVersion++; historyVersion++; refreshRequest++; pageRequest++; receiptVerification++;
     polling = false; paginationBusy = false; historyExpanded = false;
     client?.disconnect(); client = null; health = null; workspace = null; models = []; policies = null; pending = null; recovery = null; receipt = null;
@@ -225,7 +235,13 @@ export function mountDashboard(): () => void {
     const version = connectionVersion;
     const current = () => !life.signal.aborted && client === active && version === connectionVersion;
     recovery = { client: active, request }; setBusy(true); text("#inference-error", "");
-    void active.settleLocalAndRun(request, { ...options, onStep: (state) => { if (current()) onStep(state); } }).then(async (result) => {
+    void (async () => {
+      const runOptions = { ...options, onStep: (state: InferenceStep) => { if (current()) onStep(state); } };
+      if (canSettleLocally(request.health)) return active.settleLocalAndRun(request, runOptions);
+      const policy = configuredArcPaymentPolicy();
+      if (!policy) throw new ApiError(403, "PAYMENTS_DISABLED", "Real payments have not been enabled on this deployment");
+      return active.settleArcAndRun(request, paymentWallet(), policy, runOptions);
+    })().then(async (result) => {
       if (!current()) { result.outputBytes.fill(0); return; }
       await finish(result);
     }).catch((error: unknown) => {
@@ -253,22 +269,55 @@ export function mountDashboard(): () => void {
   on("#execution-mode", "change", () => { $("#agent-choice").hidden = select("#execution-mode").value !== "agent"; });
   on("#receipt-search", "input", renderReceipts);
   on("#disconnect-gateway", "click", () => { clearWorkspace(); notify("Workspace disconnected. Local secrets cleared."); });
-  on("#connection-form", "submit", (event) => {
-    event.preventDefault(); const version = ++connectionVersion;
-    text("#connection-error", ""); $<HTMLButtonElement>("#connect-gateway").disabled = true;
+  const stopWalletListener = onWalletChanged(() => {
+    loginGeneration++;
+    if (walletToken) { clearWorkspace(); notify("Wallet changed. Sign in again to load its workspace."); }
+  });
+  void walletLoginAvailable().then(available => { if (!life.signal.aborted) { $("#wallet-login-panel").hidden = !available; $<HTMLDetailsElement>("#operator-access").open = !available; } });
+  on("#wallet-login", "click", () => {
+    if (signingIn) return;
+    clearWorkspace(); const generation = ++loginGeneration, version = ++connectionVersion;
+    signingIn = true; $<HTMLButtonElement>("#wallet-login").disabled = true;
+    text("#connection-error", ""); text("#wallet-login-status", "Approve the sign-in message in your connected wallet. No payment is requested.");
     void (async () => {
-      const next = new EnclaveClient({ apiKey: input("#api-key").value.trim(), baseUrl: input("#gateway-url").value.trim() });
-      try {
-        const [h, w, m, p] = await Promise.all([next.health(options), next.workspace({}, options), next.models(options), next.policies(options)]);
-        if (version !== connectionVersion || life.signal.aborted) { next.disconnect(); return; }
-        client?.disconnect(); client = next; health = h; workspace = w; models = m; policies = p;
-        historyVersion++; refreshRequest++; pageRequest++; polling = false; paginationBusy = false; historyExpanded = false;
-        input("#api-key").value = ""; $("#connection-panel").classList.add("connected"); $("#disconnect-gateway").hidden = false;
-        $$<HTMLButtonElement>("[data-requires-connection]").forEach((button) => { button.disabled = false; });
-        $$<HTMLButtonElement>("[id^=load-more-]").forEach((button) => { button.disabled = false; });
-        renderHealth(); renderWorkspace(); notify("Workspace connected. History loaded from the backend.");
-      } catch (error) { next.disconnect(); throw error; }
-    })().catch((error: unknown) => { if (!life.signal.aborted) text("#connection-error", message(error)); }).finally(() => { if (!life.signal.aborted) $<HTMLButtonElement>("#connect-gateway").disabled = false; });
+      const wallet = paymentWallet();
+      const current = () => !life.signal.aborted && generation === loginGeneration && version === connectionVersion;
+      const session = await loginWallet(wallet, current);
+      if (!current()) { void logoutWallet(session.token).catch(() => {}); return; }
+      walletToken = session.token;
+      await connectWorkspace(session.token, "/api", version);
+      if (!current()) return;
+      loginExpiry = setTimeout(() => { clearWorkspace(); notify("Your wallet login expired. Sign in again."); }, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+      text("#connection-note", "Signed in with your wallet. This session stays in this tab and expires after 30 minutes.");
+      text("#wallet-login-status", "Signed in. Payments are confirmed separately in your wallet.");
+      if (health?.paymentMode !== "authorized" || health.chainId !== 5042) {
+        $<HTMLButtonElement>("#run-inference").disabled = true;
+        text("#request-note", "Wallet login is available. Public inference and real payments are not enabled on this pilot yet.");
+      }
+      $$<HTMLButtonElement>("[data-requires-connection]").filter(button => button.id !== "run-inference").forEach(button => { button.disabled = true; });
+    })().catch((error: unknown) => {
+      if (generation === loginGeneration && !life.signal.aborted) { clearWorkspace(); text("#connection-error", message(error)); text("#wallet-login-status", "Sign-in was not completed. You can try again."); }
+    }).finally(() => { signingIn = false; if (!life.signal.aborted) $<HTMLButtonElement>("#wallet-login").disabled = false; });
+  });
+  async function connectWorkspace(apiKey: string, baseUrl: string, version: number) {
+    const next = new EnclaveClient({ apiKey, baseUrl });
+    try {
+      const [h, w, m, p] = await Promise.all([next.health(options), next.workspace({}, options), next.models(options), next.policies(options)]);
+      if (version !== connectionVersion || life.signal.aborted) { next.disconnect(); return; }
+      client?.disconnect(); client = next; health = h; workspace = w; models = m; policies = p;
+      historyVersion++; refreshRequest++; pageRequest++; polling = false; paginationBusy = false; historyExpanded = false;
+      input("#api-key").value = ""; $("#connection-panel").classList.add("connected"); $("#disconnect-gateway").hidden = false;
+      $$<HTMLButtonElement>("[data-requires-connection]").forEach(button => { button.disabled = false; });
+      $$<HTMLButtonElement>("[id^=load-more-]").forEach(button => { button.disabled = false; });
+      renderHealth(); renderWorkspace(); notify("Workspace connected. History loaded from the backend.");
+    } catch (error) { next.disconnect(); throw error; }
+  }
+  on("#connection-form", "submit", (event) => {
+    event.preventDefault(); loginGeneration++; clearTimeout(loginExpiry);
+    if (walletToken) { void logoutWallet(walletToken).catch(() => {}); walletToken = null; }
+    const version = ++connectionVersion;
+    text("#connection-error", ""); $<HTMLButtonElement>("#connect-gateway").disabled = true;
+    void connectWorkspace(input("#api-key").value.trim(), input("#gateway-url").value.trim(), version).catch((error: unknown) => { if (!life.signal.aborted) text("#connection-error", message(error)); }).finally(() => { if (!life.signal.aborted) $<HTMLButtonElement>("#connect-gateway").disabled = false; });
   });
   on("#inference-form", "submit", (event) => {
     event.preventDefault(); const active = client; if (!active || busy || recovery) return;
@@ -284,9 +333,12 @@ export function mountDashboard(): () => void {
       pending = prepared; const required = prepared.challenge!.accepts[0]!;
       text("#payment-amount", `${units(required.maxAmountRequired)} USDC`);
       text("#payment-id", `Payment ${required.extra.paymentId}`);
+      text("#payment-recipient", `Recipient: ${required.payTo}`);
       const local = canSettleLocally(prepared.health);
-      text("#payment-mode-note", local ? `This uses test USDC on local chain 31337. The gateway will settle the payment, run the configured model and issue a signed receipt.${prepared.health.inferenceBackend === "echo" ? "" : " Remote provider usage can still be billed."}` : "This gateway requires an external wallet authorization. Real-network settlement is not enabled in this dashboard.");
-      text("#payment-error", ""); $<HTMLButtonElement>("#confirm-payment").disabled = !local; dialog("#payment-dialog").showModal();
+      const real = configuredArcPaymentPolicy() !== null && prepared.health.chainId === arc.chainId && prepared.health.paymentMode === "authorized";
+      text("#confirm-payment span", local ? "Settle test payment & run" : "Approve USDC payment & run");
+      text("#payment-mode-note", local ? `This uses test USDC on local chain 31337. The gateway will settle the payment, run the configured model and issue a signed receipt.${prepared.health.inferenceBackend === "echo" ? "" : " Remote provider usage can still be billed."}` : real ? "This charges real USDC on Arc Mainnet. Check the amount and full recipient address below, then approve the authorization in your connected wallet. Failed inference does not automatically refund a settled payment." : "This gateway requires an external wallet authorization. Real-network settlement is not enabled in this dashboard.");
+      text("#payment-error", ""); $<HTMLButtonElement>("#confirm-payment").disabled = !local && !real; dialog("#payment-dialog").showModal();
     }).catch((error: unknown) => { if (!life.signal.aborted && client === active) { text("#inference-error", message(error)); text("#output-status", "Request stopped"); setBusy(false); void refresh(true); } });
   });
   on("#confirm-payment", "click", () => {
@@ -365,5 +417,5 @@ export function mountDashboard(): () => void {
   const timer = setInterval(() => { if (!document.hidden && client && !pending && !busy && !historyExpanded && !paginationBusy) void refresh(true); }, 5000);
   navigate(new URLSearchParams(location.search).get("view") ?? "inference");
   root.setAttribute("data-workspace-ready", "true");
-  return () => { life.abort(); client?.disconnect(); clearInterval(timer); clearTimeout(toastTimer); lastResult?.outputBytes.fill(0); const secret = document.querySelector<HTMLInputElement>("#view-key-secret"); if (secret) secret.value = ""; };
+  return () => { life.abort(); stopWalletListener(); loginGeneration++; clearTimeout(loginExpiry); if (walletToken) void logoutWallet(walletToken).catch(() => {}); walletToken = null; client?.disconnect(); clearInterval(timer); clearTimeout(toastTimer); lastResult?.outputBytes.fill(0); const secret = document.querySelector<HTMLInputElement>("#view-key-secret"); if (secret) secret.value = ""; };
 }

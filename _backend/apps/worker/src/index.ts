@@ -2,6 +2,7 @@ import { config as loadDotenv } from "dotenv";
 import { Queue, Worker } from "bullmq";
 import pino from "pino";
 import { z } from "zod";
+import { withRelayKey } from "@enclave/core/relay-key";
 import { isConfiguredAddress } from "@enclave/core";
 import { createDb } from "@enclave/db";
 import { anchorReceipt } from "./anchorer.js";
@@ -27,7 +28,7 @@ const env = z.object({
   DEPLOYER_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/)
     .default("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
     .transform((value): `0x${string}` => `0x${value.slice(2)}`),
-}).parse(process.env);
+}).parse(withRelayKey(process.env));
 
 const log = pino({ level: env.LOG_LEVEL });
 const confirmations = env.CHAIN_CONFIRMATIONS ?? ([31337, 1337].includes(env.ARC_CHAIN_ID) ? 0 : 12);

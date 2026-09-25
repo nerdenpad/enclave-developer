@@ -10,6 +10,7 @@ contract UsageMeter {
     uint256 public constant X402_VERSION = 2;
     struct FundingBlock { uint256 number; bytes32 hash; }
     address public owner;
+    address public relay;
     MockUSDC public usdc;
     address public feeVault;
     IArcConfidentialTransfer public confidential;
@@ -30,6 +31,7 @@ contract UsageMeter {
     event ProviderFeePaid(uint256 indexed listingId, address indexed provider, bytes32 indexed paymentId, uint256 amount);
     event AgentSettled(bytes32 indexed agent, bytes32 indexed paymentId, address indexed payer, uint256 amount);
     event X402AuthorizationConsumed(address indexed payer, bytes32 indexed nonce, bytes32 indexed paymentId, bool prepaid);
+    event RelayChanged(address indexed previousRelay, address indexed nextRelay);
 
     modifier nonReentrant() {
         require(!entered, "reentrant");
@@ -41,6 +43,7 @@ contract UsageMeter {
     constructor(address usdc_, address feeVault_) {
         require(usdc_ != address(0) && feeVault_ != address(0), "zero");
         owner = msg.sender;
+        relay = msg.sender;
         usdc = MockUSDC(usdc_);
         feeVault = feeVault_;
     }
@@ -48,6 +51,14 @@ contract UsageMeter {
     function setConfidential(address next) external {
         require(msg.sender == owner, "owner");
         confidential = IArcConfidentialTransfer(next);
+    }
+
+    /// @notice Keep configuration under the customer's owner wallet; rotate the operational signer independently.
+    /// Zero disables sponsored settlement and recovery without preventing payer-submitted authorizations.
+    function setRelay(address next) external {
+        require(msg.sender == owner, "owner");
+        emit RelayChanged(relay, next);
+        relay = next;
     }
 
     function setMandate(address next) external {
@@ -76,11 +87,11 @@ contract UsageMeter {
         _settle(payer, amount, paymentId, agent, listingId, false);
     }
 
-    /// @notice EIP-3009 authorizes the transfer, while the owner relay is trusted to bind listing/agent terms.
+    /// @notice EIP-3009 authorizes the transfer, while the configured relay is trusted to bind listing/agent terms.
     /// The payer may submit directly. Untrusted relayers cannot substitute routing or omit a mandate.
     function settleAuthorized(address from, uint256 amount, bytes32 paymentId, uint256 listingId, bytes32 agent,
         uint256 validAfter, uint256 validBefore, bytes calldata signature) external nonReentrant {
-        require(msg.sender == owner || msg.sender == from, "relayer");
+        require(msg.sender == relay || msg.sender == from, "relayer");
         require(!settled[paymentId], "replay");
         _receiveAuthorized(from, amount, paymentId, validAfter, validBefore, signature);
         _settle(from, amount, paymentId, agent, listingId, true);
@@ -105,7 +116,7 @@ contract UsageMeter {
     /// @notice Standard x402 exact/EIP-3009 transfer signature and independently chosen client nonce.
     function settleTransferAuthorized(address from, uint256 amount, bytes32 paymentId, uint256 listingId, bytes32 agent,
         uint256 validAfter, uint256 validBefore, bytes32 nonce, bytes calldata signature) external nonReentrant {
-        require(msg.sender == owner || msg.sender == from, "relayer");
+        require(msg.sender == relay || msg.sender == from, "relayer");
         _consumeX402(from, amount, paymentId, validAfter, validBefore, nonce, signature, false);
         _transferX402(from, amount, validAfter, validBefore, nonce, signature);
         _settle(from, amount, paymentId, agent, listingId, true);
@@ -119,12 +130,12 @@ contract UsageMeter {
         require(usdc.balanceOf(address(this)) - beforeBalance == amount, "received");
     }
 
-    /// @notice Trusted owner recovery ONLY after separately verifying a canonical token Transfer + AuthorizationUsed proof.
+    /// @notice Trusted relay recovery ONLY after separately verifying a canonical token Transfer + AuthorizationUsed proof.
     /// A token's authorizationState also covers cancellation: it is not itself evidence of a received deposit.
     function settlePrepaidTransfer(address from, uint256 amount, bytes32 paymentId, uint256 listingId, bytes32 agent,
         uint256 validAfter, uint256 validBefore, bytes32 nonce, bytes calldata signature,
         FundingBlock calldata funding) external nonReentrant {
-        require(msg.sender == owner, "owner");
+        require(msg.sender == relay, "relayer");
         require(funding.hash != bytes32(0) && funding.number < block.number && block.number - funding.number <= 256
             && blockhash(funding.number) == funding.hash, "funding block");
         _consumeX402(from, amount, paymentId, validAfter, validBefore, nonce, signature, true);

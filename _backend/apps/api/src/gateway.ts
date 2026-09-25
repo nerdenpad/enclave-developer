@@ -46,6 +46,7 @@ import {
   TransactionRevertedError,
   agents,
   apiKeys,
+  walletSessions,
   buybacks,
   chainEvents,
   idempotencyKeys,
@@ -1372,6 +1373,12 @@ export class EnclaveGateway {
   }
 
   private async requireKey(apiKey: string): Promise<string> {
+    if (apiKey.startsWith("enws_")) {
+      if (!this.config.WALLET_AUTH_ORIGIN || !/^enws_[a-f0-9]{64}$/.test(apiKey)) throw new UnauthorizedError("Wallet login unavailable");
+      const [session] = await this.db.select().from(walletSessions).where(and(eq(walletSessions.tokenHash, sha256Hex(apiKey)), gt(walletSessions.expiresAt, new Date()))).limit(1);
+      if (!session) throw new UnauthorizedError("Wallet login expired");
+      return session.ownerHash;
+    }
     const keyHash = sha256Hex(apiKey);
     const [row] = await this.db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
     if (!row) {

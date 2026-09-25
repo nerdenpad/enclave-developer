@@ -57,7 +57,7 @@ describe("API process lifecycle", () => {
     await import("./index.js");
     expect(runtime.queueFactory).toHaveBeenCalledWith("receipt-anchorer", { connection: { url: runtime.config.REDIS_URL } });
     expect(runtime.boot).toHaveBeenCalledWith(runtime.db, runtime.config, runtime.log, { receiptAnchorer: runtime.queue });
-    expect(runtime.app).toHaveBeenCalledWith(runtime.gateway, runtime.log, runtime.agent);
+    expect(runtime.app).toHaveBeenCalledWith(runtime.gateway, runtime.log, runtime.agent, undefined);
     expect(runtime.agentFactory).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, store: runtime.agentStore,
       gateway: runtime.gateway, hostSecret: runtime.hostSecret, maxBudgetUnits: 1_000_000n, callTimeoutMs: 90_000, leaseMs: 180_000 }));
     expect(runtime.agent.runNext).not.toHaveBeenCalled();

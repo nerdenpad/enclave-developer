@@ -24,5 +24,6 @@ export default defineConfig({
   reporter: "list",
   use: { baseURL: "http://127.0.0.1:5173", trace: "retain-on-failure", screenshot: "only-on-failure", serviceWorkers: "block" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], ...(executablePath ? { launchOptions: { executablePath } } : {}) } }],
-  webServer: { command: "npm run dev -- --host 127.0.0.1 --port 5173", url: "http://127.0.0.1:5173", reuseExistingServer: true, timeout: 120_000 },
+  webServer: { command: "npm run dev -- --host 127.0.0.1 --port 5173", url: "http://127.0.0.1:5173", reuseExistingServer: false, timeout: 120_000,
+    env: { VITE_WALLETCONNECT_PROJECT_ID: "", VITE_ARC_PAYMENTS_ENABLED: "false" } },
 });

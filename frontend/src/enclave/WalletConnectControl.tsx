@@ -4,8 +4,12 @@ import { connectBrowserWallet, connectWalletConnect, type WalletAccount, type Wa
 import { connectionNetworks, discoverWallets, fetchWalletDirectory, networkName, pairingLink, walletError, walletProjectId, type BrowserWallet, type ListedWallet } from "./wallets";
 import "./wallet.css";
 import arc from "./arc-mainnet.json";
+import { setPaymentWallet, walletChanged } from "./wallet-runtime";
+import { configuredArcPaymentPolicy } from "./arc-payment";
 
 export function WalletConnectControl() {
+  const paymentsConfigured = configuredArcPaymentPolicy() !== null;
+  const paymentNotice = paymentsConfigured ? "Each payment requires your approval in the wallet." : "Real USDC payments are not enabled yet.";
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [wallets, setWallets] = useState<BrowserWallet[]>([]);
@@ -40,6 +44,7 @@ export function WalletConnectControl() {
       discovery.current = null;
       void connection.current?.disconnect().catch(() => {});
       connection.current = null;
+      setPaymentWallet(null);
     };
   }, []);
   useEffect(() => {
@@ -92,7 +97,8 @@ export function WalletConnectControl() {
     const changed = (value: WalletAccount | null) => {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
-      if (!value) { connection.current = null; setNotice("Wallet disconnected. Connect again to continue."); }
+      walletChanged();
+      if (!value) { connection.current = null; setPaymentWallet(null); setNotice("Wallet disconnected. Connect again to continue."); }
     };
     try {
       const result = browser ? await connectBrowserWallet(browser, controller.signal, changed)
@@ -101,9 +107,10 @@ export function WalletConnectControl() {
         }, changed);
       if (!alive.current || controller.signal.aborted || current !== revision.current) { await result.disconnect(); return; }
       connection.current = result;
+      setPaymentWallet(result);
       setAccount(result.account); setOpen(false); setUri(""); setQr("");
       dialog.current?.close(); trigger.current?.focus();
-      setNotice("Wallet connected. Real USDC payments are not enabled yet.");
+      setNotice(`Wallet connected. ${paymentNotice}`);
     } catch (failure) {
       if (alive.current && current === revision.current) { setError(walletError(failure)); setUri(""); setSelected(null); }
     } finally { if (alive.current && current === revision.current) { setBusy(false); attempt.current = null; } }
@@ -111,6 +118,7 @@ export function WalletConnectControl() {
   async function disconnect() {
     revision.current++; attempt.current?.abort();
     const previous = connection.current; connection.current = null;
+    setPaymentWallet(null);
     setAccount(null); setBusy(false);
     setNotice("Wallet disconnected from Enclave.");
     try { await previous?.disconnect(); }
@@ -126,7 +134,7 @@ export function WalletConnectControl() {
     setSwitching(true); setNotice("Approve the switch to Arc Mainnet in your wallet.");
     try {
       await selectedConnection.switchToArc();
-      if (alive.current && connection.current === selectedConnection) setNotice("Connected to Arc Mainnet. Real USDC payments are not enabled yet.");
+      if (alive.current && connection.current === selectedConnection) setNotice(`Connected to Arc Mainnet. ${paymentNotice}`);
     } catch {
       if (alive.current && connection.current === selectedConnection) setNotice("The network switch was not completed. You can try again from your wallet.");
     } finally { if (alive.current) setSwitching(false); }
@@ -144,7 +152,7 @@ export function WalletConnectControl() {
         {account && account.chainId !== arc.chainId && account.transport === "browser" && <button type="button" className="wallet-secondary" disabled={switching} onClick={() => void switchNetwork()}>{switching ? "Switching to Arc…" : "Switch to Arc"}</button>}
       </div>
       {account && <span className="wallet-network">{account.name} · {networkName(account.chainId)}</span>}
-      <span className="wallet-note">USDC on Arc · Payments not enabled yet</span>
+      <span className="wallet-note">USDC on Arc · {paymentsConfigured ? "Approve each payment in your wallet" : "Payments not enabled yet"}</span>
       <span className="wallet-notice" role="status">{notice}</span>
     </div>
     <dialog className="wallet-dialog" data-react-controlled ref={dialog} aria-labelledby="wallet-dialog-title" aria-describedby="wallet-dialog-description"
@@ -162,7 +170,7 @@ export function WalletConnectControl() {
       }}>
       <div className="wallet-dialog-heading"><h2 id="wallet-dialog-title">{account ? "Connected wallet" : "Connect your wallet"}</h2><button type="button" className="wallet-secondary" onClick={close} aria-label="Close wallet dialog">Close</button></div>
       <p id="wallet-dialog-description" className="wallet-note">Choose a wallet to share your address. Connecting does not sign a payment or give Enclave access to your funds.</p>
-      {account ? <div className="wallet-account"><span>{account.name} · {networkName(account.chainId)}</span><code>{account.address}</code><p>Real USDC payments are not enabled on this deployment.</p><button type="button" className="wallet-trigger" onClick={() => { void disconnect(); close(); }}>Disconnect wallet</button></div> : <>
+      {account ? <div className="wallet-account"><span>{account.name} · {networkName(account.chainId)}</span><code>{account.address}</code><p>{paymentNotice}</p><button type="button" className="wallet-trigger" onClick={() => { void disconnect(); close(); }}>Disconnect wallet</button></div> : <>
         {!busy && <>
           <label className="wallet-label" htmlFor="wallet-search">Search wallets</label>
           <input id="wallet-search" className="wallet-input" type="search" autoComplete="off" maxLength={80} value={search} onChange={event => { setSearch(event.target.value); setPage(1); setDirectory([]); setTotal(0); }} />
@@ -172,7 +180,7 @@ export function WalletConnectControl() {
           {walletProjectId ? <>
             <label className="wallet-label" htmlFor="wallet-network">Connection network</label>
             <select id="wallet-network" className="wallet-input" value={chainId} onChange={event => { setChainId(Number(event.target.value)); setPage(1); setDirectory([]); setTotal(0); }}>{connectionNetworks.map(network => <option key={network.id} value={network.id}>{network.name}</option>)}</select>
-            <p className="wallet-note">Arc Mainnet is the selected payment network. Connecting does not enable payments; settlement is still being prepared.</p>
+            <p className="wallet-note">Arc Mainnet is the selected payment network. {paymentNotice}</p>
             <button type="button" className="wallet-qr-button" onClick={() => void connect(null)}>Connect with QR code</button>
             <p className="wallet-note" role="status">{loading ? "Loading wallets…" : directoryError || `${directory.length} wallets loaded${total ? ` · ${total} directory results` : ""}`}</p>
             <div className="wallet-list">{directory.map(wallet => <button className="wallet-choice" type="button" key={wallet.id} onClick={() => void connect(wallet)}><span>{wallet.name}</span><small>WalletConnect</small></button>)}</div>

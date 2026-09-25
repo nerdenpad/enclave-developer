@@ -2,6 +2,8 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashTypedData, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import arc from "./arc-mainnet.json";
+import { receiveData, type ArcPaymentIntent } from "./arc-payment";
 import {
   ApiError, EnclaveClient, RECEIPT_TYPES, canSettleLocally, decryptAesGcm, encryptAesGcm,
   importSessionKey, sha256Hex, type EncryptedBlob, type Health, type Receipt, type WorkspaceReceipt,
@@ -68,6 +70,73 @@ function scenario(options: { health?: Partial<Health>; challenge?: unknown; resp
   return { client, fetcher, counts: () => ({ paidAttempts, settlementCount }) };
 }
 afterEach(() => vi.useRealTimers());
+
+describe("explicit Arc wallet settlement", () => {
+  const policy = { meter: `0x${"33".repeat(20)}`, verifier: health.verifierAddress, receiptSigner: account.address, maxAmountUnits: "1000" };
+  function arcScenario(extra: { failSettle?: boolean; failPaid?: boolean } = {}) {
+    const options = { ...extra, health: { chainId: arc.chainId, paymentMode: "authorized" as const, settlementToken: arc.usdc.address as Hex },
+      challenge: { ...challenge(), accepts: [{ ...challenge().accepts[0]!, network: "arc-5042", asset: arc.usdc.address }] },
+      response: (body: string) => signedResponse(body, { chainId: arc.chainId }) };
+    const wallet = { account: { address: account.address, chainId: arc.chainId }, authorizeArc: vi.fn(async (intent: ArcPaymentIntent) => ({
+      from: account.address, validAfter: "0", validBefore: intent.validBefore, signature: await account.signTypedData(receiveData(intent)),
+    })) };
+    return { ...scenario(options), wallet, options };
+  }
+  it("does not sign during preparation and validates the resulting paid receipt on Arc", async () => {
+    const { client, wallet, counts } = arcScenario();
+    const prepared = await client.prepareInference("private request");
+    expect(wallet.authorizeArc).not.toHaveBeenCalled();
+    expect((await client.settleArcAndRun(prepared, wallet, policy)).outputText).toBe("Verified answer ✓");
+    expect(wallet.authorizeArc).toHaveBeenCalledTimes(1);
+    expect(counts()).toEqual({ paidAttempts: 1, settlementCount: 1 });
+    await client.settleArcAndRun(prepared, wallet, policy);
+    expect(counts()).toEqual({ paidAttempts: 1, settlementCount: 1 });
+  });
+  it("reuses byte-identical authorization after an uncertain settlement response", async () => {
+    const { client, wallet, options, fetcher } = arcScenario({ failSettle: true });
+    const prepared = await client.prepareInference("private request");
+    await expect(client.settleArcAndRun(prepared, wallet, policy)).rejects.toThrow();
+    options.failSettle = false;
+    await client.settleArcAndRun(prepared, wallet, policy);
+    const submitted = fetcher.mock.calls.filter(([url]) => String(url).endsWith("/v1/x402/settle")).map(([, init]) => init?.body);
+    expect(submitted).toHaveLength(2); expect(submitted[0]).toBe(submitted[1]);
+    expect(wallet.authorizeArc).toHaveBeenCalledTimes(1);
+  });
+  it("never resettles after inference fails following confirmed settlement", async () => {
+    const { client, wallet, options, counts } = arcScenario({ failPaid: true });
+    const prepared = await client.prepareInference("private request");
+    await expect(client.settleArcAndRun(prepared, wallet, policy)).rejects.toThrow();
+    options.failPaid = false;
+    await client.settleArcAndRun(prepared, wallet, policy);
+    expect(wallet.authorizeArc).toHaveBeenCalledTimes(1);
+    expect(counts()).toEqual({ settlementCount: 1, paidAttempts: 2 });
+  });
+  it.each([{ meter: `0x${"88".repeat(20)}` }, { maxAmountUnits: "999" }, { receiptSigner: wrongAccount.address }, { verifier: wrongAccount.address }])("rejects mismatched deployment pins or overspending before a wallet prompt: %s", async patch => {
+    const { client, wallet, counts } = arcScenario();
+    await expect(client.settleArcAndRun(await client.prepareInference("hello"), wallet, { ...policy, ...patch })).rejects.toMatchObject({ code: "ARC_PAYMENT_POLICY" });
+    expect(wallet.authorizeArc).not.toHaveBeenCalled(); expect(counts().settlementCount).toBe(0);
+  });
+  it("rejects a wallet change while approval is pending before submission", async () => {
+    const { client, wallet, counts } = arcScenario();
+    const sign = wallet.authorizeArc.getMockImplementation()!;
+    wallet.authorizeArc.mockImplementation(async intent => { const auth = await sign(intent); wallet.account.address = wrongAccount.address; return auth; });
+    await expect(client.settleArcAndRun(await client.prepareInference("hello"), wallet, policy)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(counts().settlementCount).toBe(0);
+  });
+  it("discards late approval after workspace disconnect", async () => {
+    const { client, wallet, counts } = arcScenario();
+    const sign = wallet.authorizeArc.getMockImplementation()!;
+    wallet.authorizeArc.mockImplementation(async intent => { const auth = await sign(intent); client.disconnect(); return auth; });
+    await expect(client.settleArcAndRun(await client.prepareInference("hello"), wallet, policy)).rejects.toMatchObject({ name: "AbortError" });
+    expect(counts().settlementCount).toBe(0);
+  });
+  it("user rejection never submits a payment", async () => {
+    const { client, wallet, counts } = arcScenario();
+    wallet.authorizeArc.mockRejectedValue({ code: 4001 });
+    await expect(client.settleArcAndRun(await client.prepareInference("hello"), wallet, policy)).rejects.toMatchObject({ code: 4001 });
+    expect(counts().settlementCount).toBe(0);
+  });
+});
 
 describe("browser AES-GCM interoperability", () => {
   it("creates non-extractable AES keys and decrypts Node backend outputs", async () => {

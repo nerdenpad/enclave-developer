@@ -48,6 +48,16 @@ beforeEach(() => {
 });
 
 describe("durable signer commit and nonce safety", () => {
+  it("rejects excessive Arc fees before signing or persisting a new transaction", async () => {
+    const { mock, opts } = setup();
+    opts.chainId = 5042;
+    rpc.getChainId.mockResolvedValue(5042);
+    rpc.prepareTransactionRequest.mockResolvedValue({ gas: 100_000n, maxFeePerGas: 101_000_000_000n });
+    await expect(sendDurableTransaction(opts, "operation", call)).rejects.toThrow("ARC_RELAY_GAS_LIMIT");
+    expect(rpc.signTransaction).not.toHaveBeenCalled();
+    expect(mock.values).not.toHaveBeenCalled();
+    expect(rpc.sendRawTransaction).not.toHaveBeenCalled();
+  });
   it("commits signed bytes before broadcasting and reserves the network nonce under the shared lock", async () => {
     const { mock, opts } = setup();
     let committed = false;

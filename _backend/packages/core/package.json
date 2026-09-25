@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./relay-key": "./src/relay-key.ts"
   },
   "scripts": {
     "test": "vitest run",

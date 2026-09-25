@@ -80,7 +80,7 @@ contract X402SettlementTest is Test {
     }
     function testOnlyTrustedOwnerCanCreditPrepaidDeposits() public {
         bytes memory sig = directDeposit(500, NONCE);
-        vm.expectRevert(bytes("owner"));
+        vm.expectRevert(bytes("relayer"));
         vm.prank(payer);
         meter.settlePrepaidTransfer(payer, 500, PAYMENT, 0, AGENT, 0, 2000, NONCE, sig, UsageMeter.FundingBlock(99, FUNDING_HASH));
     }

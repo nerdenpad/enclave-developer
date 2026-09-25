@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withRelayKey } from "@enclave/core/relay-key";
 import { createOpenAICompatibleInference, isConfiguredAddress } from "@enclave/core";
 import { nearBaseUrl } from "./near-provider.js";
 
@@ -6,6 +7,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   API_HOST: z.string().default("127.0.0.1"),
+  WALLET_AUTH_ORIGIN: z.string().url().refine(value => { const url = new URL(value); return url.origin === value && url.protocol === "https:"; }, "Wallet login requires an exact HTTPS origin").optional(),
   API_PORT: z.coerce.number().int().positive().default(8787),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().default("redis://127.0.0.1:6379"),
@@ -92,7 +94,7 @@ const envSchema = z.object({
 export type Config = z.infer<typeof envSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const parsed = envSchema.safeParse(env);
+  const parsed = envSchema.safeParse(withRelayKey(env));
   if (!parsed.success) {
     throw new Error(`Invalid env: ${parsed.error.message}`);
   }

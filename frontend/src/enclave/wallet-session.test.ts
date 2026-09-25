@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type SignClient from "@walletconnect/sign-client";
 import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId, switchBrowserToArc } from "./wallet-session";
 import type { BrowserProvider } from "./wallets";
+import { privateKeyToAccount } from "viem/accounts";
+import { receiveData } from "./arc-payment";
 
 const first = `0x${"11".repeat(20)}`, second = `0x${"22".repeat(20)}`;
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
@@ -12,7 +14,7 @@ function browser() {
   const provider: BrowserProvider = { request, on: (name, handler) => { listeners.set(name, handler); }, removeListener: name => { listeners.delete(name); } };
   return { wallet: { id: "fixture", name: "Fixture", provider }, request, state, listeners };
 }
-function session() { return { topic: "topic", expiry: Math.floor(Date.now() / 1000) + 60, peer: { metadata: { name: "Remote wallet" } }, namespaces: { eip155: { accounts: [`eip155:1:${first}`], methods: ["eth_signTypedData_v4"] } } }; }
+function session() { return { topic: "topic", expiry: Math.floor(Date.now() / 1000) + 60, peer: { metadata: { name: "Remote wallet" } }, namespaces: { eip155: { accounts: [`eip155:1:${first}`], methods: ["eth_signTypedData_v4", "personal_sign"] } } }; }
 function wc() {
   const gate = deferred<ReturnType<typeof session>>();
   const listeners = new Map<string, (value: { topic: string }) => void>();
@@ -22,6 +24,23 @@ function wc() {
   return { gate, listeners, disconnect, pairingDisconnect, connect, getClient: async () => client as unknown as SignClient };
 }
 describe("browser wallet lifecycle", () => {
+  it.each(["account", "network", "disconnect"])("rejects approval after a %s change even when the original signature is valid", async change => {
+    const signer = privateKeyToAccount(`0x${"11".repeat(32)}`);
+    const mock = browser(), gate = deferred<string>();
+    mock.state.accounts = [signer.address]; mock.state.chain = "0x13b2";
+    mock.request.mockImplementation(async ({ method }) => method === "eth_signTypedData_v4" ? gate.promise : method === "eth_chainId" ? mock.state.chain : mock.state.accounts);
+    const connection = await connectBrowserWallet(mock.wallet, new AbortController().signal, vi.fn());
+    const intent = { payer: signer.address, meter: second, amountUnits: "100000", paymentId: "10000000-0000-4000-8000-000000000002", validBefore: String(Math.floor(Date.now() / 1000) + 600) };
+    const pending = connection.authorizeArc(intent);
+    const rejected = expect(pending).rejects.toThrow();
+    await vi.waitFor(() => expect(mock.request.mock.calls.some(([args]) => args.method === "eth_signTypedData_v4")).toBe(true));
+    if (change === "account") mock.state.accounts = [second];
+    if (change === "network") mock.state.chain = "0x1";
+    if (change === "disconnect") await connection.disconnect();
+    gate.resolve(await signer.signTypedData(receiveData(intent)));
+    await rejected;
+    await connection.disconnect();
+  });
   it("connects with read-only calls, tracks account/network changes and removes listeners", async () => {
     const mock = browser(), changed = vi.fn();
     const connection = await connectBrowserWallet(mock.wallet, new AbortController().signal, changed);
@@ -63,7 +82,7 @@ describe("WalletConnect lifecycle", () => {
     mock.gate.resolve(session());
     const connection = await pending;
     expect(connection.account.address).toBe(first);
-    expect(mock.connect).toHaveBeenCalledWith({ requiredNamespaces: { eip155: { chains: ["eip155:1"], methods: ["eth_signTypedData_v4"], events: ["accountsChanged", "chainChanged"] } } });
+    expect(mock.connect).toHaveBeenCalledWith({ requiredNamespaces: { eip155: { chains: ["eip155:1"], methods: ["eth_signTypedData_v4", "personal_sign"], events: ["accountsChanged", "chainChanged"] } } });
     mock.listeners.get("session_update")?.({ topic: "topic" });
     await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(null));
     expect(mock.disconnect).toHaveBeenCalledTimes(1); expect(mock.listeners.size).toBe(0);
@@ -115,3 +134,4 @@ describe("Arc network switching", () => {
     expect(mock.request).toHaveBeenCalledTimes(1);
   });
 });
+

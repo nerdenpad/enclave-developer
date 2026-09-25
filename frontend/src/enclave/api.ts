@@ -1,5 +1,7 @@
 import { hashTypedData, recoverTypedDataAddress, type Hex } from "viem";
 import { z } from "zod";
+import arc from "./arc-mainnet.json" with { type: "json" };
+import { ArcPaymentPolicySchema, receiveData, type ArcPaymentPolicy, type ArcAuthorization, type ArcPaymentIntent } from "./arc-payment";
 
 const hex32 = z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform((v) => v as Hex);
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform((v) => v as Hex);
@@ -171,6 +173,7 @@ function redact(value: unknown, secrets: string[], depth = 0): unknown {
 interface PendingState {
   body: string; session: Session; health: Health; inputHash: Hex; challenge: PaymentChallenge | null;
   idempotencyKey: string; settled: boolean; busy: boolean; result: VerifiedInference | null;
+  authorization?: ArcAuthorization;
 }
 
 /** Browser-only credentials remain in memory. This client does not establish hardware trust in the gateway. */
@@ -333,6 +336,64 @@ export class EnclaveClient {
       }
       options.onStep?.("inferencing");
       const response = await this.#request("/v1/inference", { ...options, method: "POST", body: state.body, headers: { "idempotency-key": state.idempotencyKey, "x-payment": paymentId } });
+      state.result = await this.#verify(response, state, options); return state.result;
+    } finally { state.busy = false; }
+  }
+  /** Explicit confirmation only; retries reuse the exact signed authorization and request body. */
+  async settleArcAndRun(prepared: PreparedInference, wallet: { account: { address: string; chainId: number }; authorizeArc: (intent: ArcPaymentIntent) => Promise<ArcAuthorization> },
+    policyInput: ArcPaymentPolicy, options: InferenceOptions = {}): Promise<VerifiedInference> {
+    const policy = ArcPaymentPolicySchema.parse(policyInput);
+    const state = this.#pending.get(prepared);
+    if (!state) throw new ApiError(0, "UNKNOWN_REQUEST", "Prepare a request with this connected client first");
+    if (state.result) return state.result;
+    if (state.busy) throw new ApiError(409, "REQUEST_BUSY", "This request is already running");
+    if (!state.challenge) return invalid("No payment challenge is available");
+    const requirement = state.challenge.accepts[0]!;
+    const same = (a: string | undefined, b: string) => a?.toLowerCase() === b.toLowerCase();
+    const checkHealth = (h: Health) => {
+      if (h.chainId !== arc.chainId || h.paymentMode !== "authorized" || !same(h.settlementToken, arc.usdc.address)
+        || !same(h.verifierAddress, policy.verifier) || !same(h.receiptSigner, policy.receiptSigner)
+        || requirement.network !== `arc-${arc.chainId}` || !same(requirement.asset, arc.usdc.address) || !same(requirement.payTo, policy.meter)
+        || BigInt(requirement.maxAmountRequired) <= 0n || BigInt(requirement.maxAmountRequired) > BigInt(policy.maxAmountUnits)
+        || Math.round(h.inferencePriceUsdc * 1_000_000).toString() !== requirement.maxAmountRequired
+        || h.servingModel.modelHash !== state.health.servingModel.modelHash || h.servingModel.codeHash !== state.health.servingModel.codeHash) {
+        throw new ApiError(403, "ARC_PAYMENT_POLICY", "Payment does not match the reviewed Arc deployment and spending limit");
+      }
+    };
+    const checkActive = () => {
+      if (options.signal?.aborted || this.#pending.get(prepared) !== state) throw new DOMException("Request cancelled", "AbortError");
+      if (Date.parse(state.session.expiresAt) <= Date.now()) throw new ApiError(401, "SESSION_EXPIRED", "Session expired; check payment history before creating another request");
+    };
+    state.busy = true;
+    try {
+      checkActive(); checkHealth(state.health); checkHealth(await this.health(options)); checkActive();
+      const paymentId = requirement.extra.paymentId;
+      if (!state.settled) {
+        if (!state.authorization) {
+          const payer = wallet.account.address;
+          if (wallet.account.chainId !== arc.chainId) throw new ApiError(403, "WRONG_WALLET_NETWORK", "Switch your wallet to Arc Mainnet");
+          const intent = { payer, meter: policy.meter, amountUnits: requirement.maxAmountRequired, paymentId,
+            validBefore: String(Math.min(Math.floor(Date.now() / 1000) + 600, Math.floor(Date.parse(state.session.expiresAt) / 1000))) };
+          const typed = receiveData(intent);
+          const auth = await wallet.authorizeArc(intent);
+          checkActive();
+          if (!same(auth.from, payer) || auth.validAfter !== "0" || auth.validBefore !== intent.validBefore
+            || !same(await recoverTypedDataAddress({ ...typed, signature: auth.signature }), payer)
+            || !same(wallet.account.address, payer) || wallet.account.chainId !== arc.chainId) return invalid("Payment approval does not match the selected wallet");
+          // Persist in memory before the first HTTP submission, including ambiguous network failures.
+          state.authorization = Object.freeze({ ...auth });
+          checkHealth(await this.health(options)); checkActive();
+        }
+        checkActive();
+        options.onStep?.("settling");
+        const settlement = parse(z.object({ paymentId: uuid, tx: hex32, confidential: z.literal(false) }), await this.#request("/v1/x402/settle",
+          { ...options, method: "POST", body: JSON.stringify({ paymentId, confidential: false, authorization: state.authorization }) }));
+        if (settlement.paymentId !== paymentId) return invalid("Settlement response does not match this payment");
+        state.settled = true;
+      }
+      options.onStep?.("inferencing");
+      const response = await this.#request("/v1/inference", { ...options, method: "POST", body: state.body,
+        headers: { "idempotency-key": state.idempotencyKey, "x-payment": paymentId } });
       state.result = await this.#verify(response, state, options); return state.result;
     } finally { state.busy = false; }
   }

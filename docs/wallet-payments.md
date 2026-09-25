@@ -14,7 +14,25 @@ WalletConnect pairing requests Arc Mainnet. An installed browser wallet can conn
 
 The WalletConnect SDK persists protocol session material in browser storage. Enclave does not put API keys, prompts or provider credentials into that storage. Wallet state is never trusted as server-side authentication.
 
-## Target payment flow
+## Wallet sign-in
+
+After connecting on Arc, choose **Sign in with connected wallet**. This requests a [SIWE / ERC-4361](https://eips.ethereum.org/EIPS/eip-4361) message for the site's exact HTTPS origin and dashboard URI, valid for five minutes. It is an off-chain login signature, not a transaction or payment authorization. Browser extensions and WalletConnect use `personal_sign`; existing pairings may need reconnection to approve this capability.
+
+The backend verifies the signature against its stored message and atomically consumes the nonce. Each wallet has a stable private workspace identity. A random session lasts 30 minutes; only its hash is stored in PostgreSQL and the browser holds the token in memory. Logout revokes it; changing the wallet or network clears the workspace and requires login again. Reloading requires another login. No API credential is embedded in the public build or stored in localStorage.
+
+Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions on the pilot can inspect their own workspace; inference and payments require the separately configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. This is not evidence of completed paid or hardware acceptance.
+
+Run the additive database migration before setting `WALLET_AUTH_ORIGIN=https://enclaveagent.tech` on the API. Without this setting, public login is disabled. Login requests require the matching Origin header and have a 4 KB body limit, a 120-request/minute per-process ceiling, five outstanding challenges per address and ten active sessions per address. Multi-replica or high-volume deployments need a shared perimeter rate limiter. Test PostgreSQL behavior with `node --env-file=.env.demo --import tsx scripts/test-wallet-login.ts` from `_backend`; it creates and removes only a random test schema.
+
+## Payment release configuration
+
+An explicit build-time flag and reviewed UsageMeter, verifier, receipt-signer addresses and maximum payment amount are required. See `frontend/.env.example`. Missing or invalid configuration disables checkout; changing a flag alone does not supply authentication or deploy contracts.
+
+The dashboard uses the v1 `/v1/x402/settle` receive-authorization protocol with Arc's `USDC` / `2` domain and six-decimal amounts. The backend's separate x402 v2 transfer-authorization protocol remains available to API clients. Do not interchange their signatures or nonces.
+
+Checkout compares the challenge and current gateway against deployment pins, displays the full recipient and exact amount, and signs only after explicit confirmation. It rejects changed accounts/networks, invalid signatures and expired authorizations. Retries within the same open workspace preserve the authorization and request. A confirmed settlement is not submitted again if inference needs retrying. Browser state is not recovered after a page reload; use server payment history to reconcile uncertain payments. No automatic refund is promised.
+
+## Release acceptance flow
 
 1. Select **Connect wallet**, choose a wallet or scan a WalletConnect QR code on mobile.
 2. Connect to the supported payment network. Display the account, network and USDC balance.
@@ -37,7 +55,7 @@ The current backend x402 v2 path supports EIP-3009 authorizations from externall
 - WalletConnect/Reown project ID and the `enclaveagent.tech` domain allowlist. The application metadata already uses that domain.
 - Arc Mainnet is selected; the official RPC and USDC EIP-712 domain pass the read-only preflight. Production RPC capacity, finality policy and transaction acceptance still need verification.
 - Deployed Enclave contracts, recipient and funded relay wallet, with their addresses published in the deployment record.
-- Server-side authentication and wallet ownership binding; an operator API key must not be shipped to public browsers.
+- Enable the migrated server-side SIWE login and verify ownership/session expiry; an operator API key must not be shipped to public browsers.
 
 ## Acceptance
 

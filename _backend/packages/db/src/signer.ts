@@ -4,6 +4,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import type { Database } from "./client.js";
 import { chainTransactions } from "./schema.js";
+import { enforceArcRelayGas } from "./arc-gas-policy.js";
 
 export type SignerOptions = { db: Database; rpcUrl: string; chainId: number; privateKey: Hex; confirmations?: number };
 export type ContractCall = { address: Hex; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint };
@@ -125,6 +126,7 @@ export async function sendDurableTransaction(opts: SignerOptions, operationKey: 
     if (last && last.nonce >= networkNonce) throw new Error(`Signer nonce gap before ${last.nonce}; committed transactions have not entered the canonical pending chain`);
     if (networkNonce > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Signer nonce exceeds safe integer range");
     const prepared = await wallet.prepareTransactionRequest({ account: wallet.account, to: call.address, data, value: call.value ?? 0n, nonce: Number(networkNonce) });
+    enforceArcRelayGas(opts.chainId, prepared);
     const rawTransaction = await wallet.signTransaction(prepared);
     const txHash = keccak256(rawTransaction);
     const [inserted] = await tx.insert(chainTransactions).values({ scope, operationKey, requestHash, signer, nonce: networkNonce, rawTransaction, txHash }).returning();

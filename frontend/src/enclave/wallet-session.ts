@@ -1,12 +1,16 @@
 import { z } from "zod";
+import { signLoginMessage } from "./wallet-auth";
 import type SignClient from "@walletconnect/sign-client";
 import type { BrowserWallet } from "./wallets";
 import arc from "./arc-mainnet.json";
+import { signArcPayment, type ArcPaymentIntent, type ArcAuthorization } from "./arc-payment";
 
 const address = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 const addresses = z.array(address).max(100);
 export type WalletAccount = { address: string; chainId: number; name: string; transport: "browser" | "walletconnect" };
-export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; switchToArc?: () => Promise<void> };
+export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; switchToArc?: () => Promise<void>;
+  signIn: (message: string) => Promise<`0x${string}`>;
+  authorizeArc: (intent: ArcPaymentIntent) => Promise<ArcAuthorization> };
 export type AccountListener = (account: WalletAccount | null) => void;
 const abortError = () => new DOMException("Connection cancelled", "AbortError");
 export function parseChainId(value: unknown): number {
@@ -56,7 +60,28 @@ export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortS
     await abortable(refresh(), signal);
     if (signal.aborted) throw abortError();
     if (!account) throw new Error("Wallet has no available account");
-    return { account, disconnect: async () => { stop(); changed(null); }, switchToArc: async () => {
+    return { get account() { if (!account) throw Error("Wallet disconnected"); return account; },
+      signIn: async message => {
+        const before = revision, payer = account?.address;
+        const check = async () => {
+          const [rawAccounts, rawChain] = await Promise.all([provider.request({ method: "eth_accounts" }), provider.request({ method: "eth_chainId" })]);
+          if (!active || revision !== before || !payer || addresses.parse(rawAccounts)[0]?.toLowerCase() !== payer.toLowerCase() || parseChainId(rawChain) !== arc.chainId) throw Error("Wallet changed during login");
+        };
+        await check();
+        const signature = await signLoginMessage(message, payer!, args => provider.request(args));
+        await check(); return signature;
+      },
+      authorizeArc: async intent => {
+        const before = revision;
+        const check = async () => {
+          if (!active || revision !== before) throw Error("Wallet changed during payment approval");
+          const [accounts, chain] = await Promise.all([provider.request({ method: "eth_accounts" }), provider.request({ method: "eth_chainId" })]);
+          if (!active || revision !== before || addresses.parse(accounts)[0]?.toLowerCase() !== intent.payer.toLowerCase() || parseChainId(chain) !== arc.chainId) throw Error("Select the payer wallet on Arc Mainnet");
+        };
+        await check();
+        const result = await signArcPayment(intent, args => provider.request(args));
+        await check(); return result;
+      }, disconnect: async () => { stop(); changed(null); }, switchToArc: async () => {
       if (!active) throw new Error("Wallet disconnected");
       const initialAddress = account?.address;
       await switchBrowserToArc(provider, () => active && initialAddress === account?.address);
@@ -111,7 +136,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
   parseChainId(chainId);
   const client = await abortable(getClient(projectId), signal);
   if (signal.aborted) throw abortError();
-  const proposal = await client.connect({ requiredNamespaces: { eip155: { chains: [`eip155:${chainId}`], methods: ["eth_signTypedData_v4"], events: ["accountsChanged", "chainChanged"] } } });
+  const proposal = await client.connect({ requiredNamespaces: { eip155: { chains: [`eip155:${chainId}`], methods: ["eth_signTypedData_v4", "personal_sign"], events: ["accountsChanged", "chainChanged"] } } });
   const reason = { code: 6000, message: "User disconnected" };
   let acceptedTopic: string | undefined;
   const cancelPairing = () => {
@@ -150,7 +175,19 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     client.on("session_delete", dropped); client.on("session_expire", dropped);
     client.on("session_update", updated); client.on("session_event", updated);
     changed(account);
-    return { account, disconnect };
+    return { account, disconnect, signIn: async message => {
+      const check = () => { if (!active || chainId !== arc.chainId || session.expiry <= Date.now() / 1000) throw Error("Reconnect your wallet on Arc Mainnet"); };
+      check();
+      const namespace = session.namespaces["eip155"] ?? session.namespaces[`eip155:${chainId}`];
+      if (!namespace?.methods.includes("personal_sign")) throw Error("Reconnect and approve wallet login capability");
+      const signature = await signLoginMessage(message, account.address, request => client.request({ topic: session.topic, chainId: `eip155:${arc.chainId}`, request }));
+      check(); return signature;
+    }, authorizeArc: async intent => {
+      if (!active || chainId !== arc.chainId || account.address.toLowerCase() !== intent.payer.toLowerCase() || session.expiry <= Date.now() / 1000) throw Error("Reconnect the payer wallet on Arc Mainnet");
+      const result = await signArcPayment(intent, request => client.request({ topic: session.topic, chainId: `eip155:${arc.chainId}`, request }));
+      if (!active || session.expiry <= Date.now() / 1000) throw Error("Wallet changed during payment approval");
+      return result;
+    } };
   } catch (error) {
     cancelPairing();
     if (acceptedTopic) await client.disconnect({ topic: acceptedTopic, reason }).catch(() => {});
