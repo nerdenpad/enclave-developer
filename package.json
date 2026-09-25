@@ -9,6 +9,8 @@
     "dev": "node scripts/enclave.mjs dev",
     "start": "node scripts/enclave.mjs dev",
     "demo:prepare": "node scripts/enclave.mjs prepare",
+    "demo:simulate": "node scripts/enclave.mjs simulate",
+    "demo:record:simulation": "node --env-file=_backend/.env.demo frontend/scripts/record-simulation.mjs",
     "demo:register": "node scripts/enclave.mjs register",
     "demo:stop": "node scripts/enclave.mjs stop",
     "typecheck": "npm --prefix _backend run typecheck && npm --prefix frontend run typecheck",

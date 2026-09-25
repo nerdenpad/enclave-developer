@@ -102,7 +102,7 @@ async function prepare(extra = []) {
 async function register() { await prepare(["--register"]); }
 
 try {
-  if (!["dev", "prepare", "register", "stop"].includes(command)) throw new Error("Commands: dev, prepare [--near-env FILE], register, stop.");
+  if (!["dev", "simulate", "prepare", "register", "stop"].includes(command)) throw new Error("Commands: dev, simulate, prepare [--near-env FILE], register, stop.");
   if (command !== "prepare" && args.length) throw new Error("Only prepare accepts additional arguments.");
   if (command === "stop") {
     if (!existsSync(path.join(backend, ".env.demo"))) throw new Error("No demo profile exists in this copy.");
@@ -115,23 +115,28 @@ try {
     if (!existsSync(path.join(backend, "node_modules", "tsx", "package.json"))) throw new Error("Backend dependencies are missing. Run npm run setup first.");
     if (command === "prepare") await prepare(args);
     if (command === "register") await register();
-    if (command === "dev") {
+    if (command === "dev" || command === "simulate") {
+      const simulation = command === "simulate";
+      // Process-only overrides: preserve the reviewed NEAR profile on disk.
+      const provider = simulation ? { INFERENCE_BACKEND: "echo", INFERENCE_MODEL: "echo", INFERENCE_API_KEY: "", INFERENCE_ALLOW_REMOTE: "false" } : {};
       if (!existsSync(path.join(frontend, "node_modules", "vite", "bin", "vite.js"))) throw new Error("Frontend dependencies are missing. Run npm run setup first.");
       await Promise.all([assertFree(8789), assertFree(5173)]);
       await prepare();
       if (stopping) throw new Error("Startup was interrupted.");
-      child(process.execPath, ["--env-file=.env.demo", "--import", "tsx", "apps/api/src/index.ts"], backend, {}, true);
+      child(process.execPath, ["--env-file=.env.demo", "--import", "tsx", "apps/api/src/index.ts"], backend, provider, true);
       await waitFor("http://127.0.0.1:8789/health", async (response) => {
         const health = await response.json();
-        return health.teeMode === "dev" && health.chainId === 31337;
+        return health.teeMode === "dev" && health.chainId === 31337 && (!simulation || (health.inferenceBackend === "echo" && health.paymentMode === "mock"));
       });
-      await register();
+      if (simulation) await run(process.execPath, ["--env-file=.env.demo", "--import", "tsx", "scripts/register-serving-model.ts", "--model", "echo", "--apply", "--bootstrap"], backend, provider);
+      else await register();
       if (stopping) throw new Error("Startup was interrupted.");
-      child(process.execPath, ["--env-file=.env.demo", "--import", "tsx", "apps/worker/src/index.ts"], backend, {}, true);
+      child(process.execPath, ["--env-file=.env.demo", "--import", "tsx", "apps/worker/src/index.ts"], backend, provider, true);
       child(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5173", "--strictPort"], frontend,
         { ENCLAVE_API_URL: "http://127.0.0.1:8789" }, true);
       await waitFor("http://127.0.0.1:5173/dashboard");
       console.log("Enclave is ready: http://127.0.0.1:5173/dashboard");
+      if (simulation) console.log("SIMULATION: local Echo fixture, software attestation, Anvil test tokens. No GPU or real-USDC payments.");
       console.log("Use /api and the private DEMO_API_KEY from _backend/.env.demo. No credentials are printed.");
       console.log("Ctrl+C stops the API, worker and frontend. Then npm run demo:stop stops the three demo containers and preserves their volumes.");
       await finished;
