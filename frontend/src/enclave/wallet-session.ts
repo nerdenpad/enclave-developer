@@ -8,7 +8,7 @@ import { signArcPayment, type ArcPaymentIntent, type ArcAuthorization } from "./
 const address = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 const addresses = z.array(address).max(100);
 export type WalletAccount = { address: string; chainId: number; name: string; transport: "browser" | "walletconnect" };
-export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; switchToArc?: () => Promise<void>;
+export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; detach?: () => void; topic?: string; switchToArc?: () => Promise<void>;
   signIn: (message: string) => Promise<`0x${string}`>;
   authorizeArc: (intent: ArcPaymentIntent) => Promise<ArcAuthorization> };
 export type AccountListener = (account: WalletAccount | null) => void;
@@ -28,10 +28,10 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
-export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortSignal, changed: AccountListener): Promise<WalletConnection> {
+export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortSignal, changed: AccountListener, restoreAddress?: string): Promise<WalletConnection> {
   if (signal.aborted) throw abortError();
   const { provider } = wallet;
-  await abortable(provider.request({ method: "eth_requestAccounts" }), signal);
+  if (!restoreAddress) await abortable(provider.request({ method: "eth_requestAccounts" }), signal);
   let active = true, revision = 0;
   let account: WalletAccount | null = null;
   const stop = () => {
@@ -60,7 +60,8 @@ export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortS
     await abortable(refresh(), signal);
     if (signal.aborted) throw abortError();
     if (!account) throw new Error("Wallet has no available account");
-    return { get account() { if (!account) throw Error("Wallet disconnected"); return account; },
+    if (restoreAddress && (account as WalletAccount).address.toLowerCase() !== restoreAddress.toLowerCase()) throw Error("Selected wallet changed");
+    return { detach: stop, get account() { if (!account) throw Error("Wallet disconnected"); return account; },
       signIn: async message => {
         const before = revision, payer = account?.address;
         const check = async () => {
@@ -131,12 +132,12 @@ export function accountFromSession(session: unknown, chainId: number): WalletAcc
 }
 
 export async function connectWalletConnect(projectId: string, chainId: number, signal: AbortSignal, showUri: (uri: string) => void, changed: AccountListener,
-  getClient: (id: string) => Promise<SignClient> = loadClient): Promise<WalletConnection> {
+  getClient: (id: string) => Promise<SignClient> = loadClient, restore?: { topic: string; address: string }): Promise<WalletConnection> {
   if (signal.aborted) throw abortError();
   parseChainId(chainId);
   const client = await abortable(getClient(projectId), signal);
   if (signal.aborted) throw abortError();
-  const proposal = await client.connect({ requiredNamespaces: { eip155: { chains: [`eip155:${chainId}`], methods: ["eth_signTypedData_v4", "personal_sign"], events: ["accountsChanged", "chainChanged"] } } });
+  const proposal = restore ? { uri: undefined, approval: async () => client.session.get(restore.topic) } : await client.connect({ requiredNamespaces: { eip155: { chains: [`eip155:${chainId}`], methods: ["eth_signTypedData_v4", "personal_sign"], events: ["accountsChanged", "chainChanged"] } } });
   const reason = { code: 6000, message: "User disconnected" };
   let acceptedTopic: string | undefined;
   const cancelPairing = () => {
@@ -145,7 +146,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
   };
   // Approval may arrive after Escape/unmount. Close that session instead of reconnecting the UI.
   const approval = proposal.approval().then(async session => {
-    if (signal.aborted) { await client.disconnect({ topic: session.topic, reason }).catch(() => {}); throw abortError(); }
+    if (signal.aborted) { if (!restore) await client.disconnect({ topic: session.topic, reason }).catch(() => {}); throw abortError(); }
     acceptedTopic = session.topic;
     return session;
   });
@@ -155,6 +156,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     if (proposal.uri) showUri(proposal.uri);
     const session = await abortable(approval, signal);
     const account = accountFromSession(session, chainId);
+    if (restore && account.address.toLowerCase() !== restore.address.toLowerCase()) throw Error("Selected wallet changed");
     if (signal.aborted) throw abortError();
     let active = true;
     const cleanup = () => {
@@ -175,7 +177,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     client.on("session_delete", dropped); client.on("session_expire", dropped);
     client.on("session_update", updated); client.on("session_event", updated);
     changed(account);
-    return { account, disconnect, signIn: async message => {
+    return { account, disconnect, detach: cleanup, topic: session.topic, signIn: async message => {
       const check = () => { if (!active || chainId !== arc.chainId || session.expiry <= Date.now() / 1000) throw Error("Reconnect your wallet on Arc Mainnet"); };
       check();
       const namespace = session.namespaces["eip155"] ?? session.namespaces[`eip155:${chainId}`];
@@ -190,7 +192,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     } };
   } catch (error) {
     cancelPairing();
-    if (acceptedTopic) await client.disconnect({ topic: acceptedTopic, reason }).catch(() => {});
+    if (acceptedTopic && !restore) await client.disconnect({ topic: acceptedTopic, reason }).catch(() => {});
     // Always consume eventual rejection even when cancelled before awaiting approval.
     void approval.catch(() => {});
     throw error;

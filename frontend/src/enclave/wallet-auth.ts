@@ -23,7 +23,7 @@ export async function signLoginMessage(message: string, address: string, request
 }
 
 async function authRequest(path: string, body?: unknown, token?: string) {
-  const response = await fetch(`/api/v1/auth/wallet/${path}`, { method: body === undefined ? "GET" : "POST", credentials: "omit",
+  const response = await fetch(`/api/v1/auth/wallet/${path}`, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
     headers: { "content-type": "application/json", ...(token ? { "x-api-key": token } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw Error(response.status === 429 ? "Too many login attempts. Please wait a few minutes." : "Wallet login failed or expired. Please try again.");
@@ -36,6 +36,15 @@ export async function walletLoginAvailable(): Promise<boolean> {
   } catch { return false; }
 }
 export async function logoutWallet(token: string) { await authRequest("logout", {}, token); }
+export async function resumeWallet(wallet: WalletConnection) {
+  const address = wallet.account.address;
+  if (wallet.account.chainId !== 5042) return null;
+  const session = z.object({ token: z.string().regex(/^enws_[a-f0-9]{64}$/), address: z.string(), expiresAt: z.string().datetime() }).parse(await authRequest("resume", { address }));
+  if (wallet.account.address.toLowerCase() !== address.toLowerCase() || wallet.account.chainId !== 5042
+    || session.address.toLowerCase() !== address.toLowerCase() || Date.parse(session.expiresAt) <= Date.now()
+    || Date.parse(session.expiresAt) > Date.now() + 1_805_000) throw Error("Wallet login expired or changed");
+  return session;
+}
 export async function loginWallet(wallet: WalletConnection, stillCurrent: () => boolean) {
   const address = wallet.account.address;
   const check = () => {

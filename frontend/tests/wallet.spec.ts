@@ -72,6 +72,26 @@ test("selected extension connects without signatures, updates account/network an
   await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeVisible();
 });
 
+test("wallet connection survives home navigation and reload without another approval", async ({ page }) => {
+  await installWallets(page);
+  await page.route("**/api/v1/auth/wallet/**", route => route.fulfill({ status: 401, json: {} }));
+  await page.goto("/dashboard");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await page.getByRole("button", { name: "Fixture Beta" }).click();
+  await expect(page.locator(".wallet-network")).toHaveText("Fixture Beta · Ethereum");
+  await page.goto("/"); await page.goto("/dashboard");
+  await expect(page.locator(".wallet-network")).toHaveText("Fixture Beta · Ethereum");
+  await page.reload();
+  await expect(page.locator(".wallet-network")).toHaveText("Fixture Beta · Ethereum");
+  const calls = await page.evaluate(() => Reflect.get(window, "walletFixtureCalls")) as { name: string; method: string }[];
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.every(call => call.name === "Fixture Beta" && ["eth_accounts", "eth_chainId"].includes(call.method))).toBe(true);
+  await page.locator(".wallet-control").getByRole("button", { name: "Disconnect wallet" }).click();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("enclave.wallet.selection"))).toBeNull();
+});
+
 test("Arc switching requires a separate click and never requests payment", async ({ page }) => {
   await installWallets(page);
   await page.goto("/dashboard");

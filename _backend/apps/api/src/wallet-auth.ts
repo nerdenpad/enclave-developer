@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { getAddress, recoverMessageAddress, type Hex } from "viem";
 import { createSiweMessage, parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
@@ -13,6 +14,7 @@ export interface WalletLoginStore {
   get(id: string): Promise<Challenge | undefined>;
   consume(id: string, tokenHash: string, expiresAt: Date): Promise<boolean>;
   revoke(tokenHash: string): Promise<void>;
+  session(tokenHash: string): Promise<{ address: string; expiresAt: Date } | undefined>;
 }
 export class PostgresWalletLoginStore implements WalletLoginStore {
   constructor(private sql: ReturnType<typeof createDb>["sql"]) {}
@@ -50,6 +52,10 @@ export class PostgresWalletLoginStore implements WalletLoginStore {
     });
   }
   async revoke(hash: string) { await this.sql`delete from wallet_login_sessions where token_hash=${hash}`; }
+  async session(hash: string) {
+    const [row] = await this.sql`select address,expires_at from wallet_login_sessions where token_hash=${hash} and expires_at > now()`;
+    return row ? { address: String(row.address), expiresAt: new Date(row.expires_at) } : undefined;
+  }
 }
 
 export class WalletLogin {
@@ -80,10 +86,18 @@ export class WalletLogin {
     return { token, address: signer, expiresAt: expiresAt.toISOString() };
   }
   async logout(token: string) { if (/^enws_[a-f0-9]{64}$/.test(token)) await this.store.revoke(sha256Hex(token)); }
+  async resume(token: string, address: string) {
+    if (!/^enws_[a-f0-9]{64}$/.test(token)) throw new UnauthorizedError("No wallet login session");
+    const session = await this.store.session(sha256Hex(token));
+    if (!session || session.expiresAt.getTime() <= Date.now() || session.address.toLowerCase() !== address.toLowerCase()) throw new UnauthorizedError("Wallet login expired or changed");
+    return { token, address: session.address, expiresAt: session.expiresAt.toISOString() };
+  }
 }
 
 export function walletLoginRoutes(login: WalletLogin) {
   const app = new Hono();
+  const cookie = "__Secure-enclave-login";
+  const cookieOptions = { path: "/api/v1/auth/wallet", secure: true, httpOnly: true, sameSite: "Strict" as const };
   let remaining = 120, reset = Date.now() + 60_000;
   app.use("*", bodyLimit({ maxSize: 4096, onError: c => c.json({ title: "BODY_TOO_LARGE", status: 413 }, 413) }));
   app.use("*", async (c, next) => {
@@ -104,8 +118,23 @@ export function walletLoginRoutes(login: WalletLogin) {
   app.post("/verify", async c => {
     const body = z.object({ id: z.string().regex(/^[a-f0-9]{48}$/), signature: z.string().regex(/^0x[a-fA-F0-9]{130}$/) }).strict().safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ValidationError({ login: "Expected a challenge ID and EOA signature" });
-    return c.json(await login.verify(body.data.id, body.data.signature as Hex));
+    const session = await login.verify(body.data.id, body.data.signature as Hex);
+    setCookie(c, cookie, session.token, { ...cookieOptions, expires: new Date(session.expiresAt) });
+    return c.json(session);
   });
-  app.post("/logout", async c => { await login.logout(c.req.header("x-api-key") ?? ""); return c.json({ ok: true }); });
+  // Restore only through an origin-checked POST. The bearer stays in JS memory;
+  // its durable copy is a scoped HttpOnly cookie, never localStorage.
+  app.post("/resume", async c => {
+    const body = z.object({ address: z.string().regex(/^0x[a-fA-F0-9]{40}$/) }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new ValidationError({ login: "Expected a wallet address" });
+    return c.json(await login.resume(getCookie(c, cookie) ?? "", body.data.address));
+  });
+  app.post("/logout", async c => {
+    const stored = getCookie(c, cookie), token = c.req.header("x-api-key") ?? stored ?? "";
+    await login.logout(token);
+    // A late cancellation of an old login must not remove a newer browser session.
+    if (!stored || stored === token) deleteCookie(c, cookie, cookieOptions);
+    return c.json({ ok: true });
+  });
   return app;
 }

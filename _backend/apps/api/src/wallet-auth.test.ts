@@ -13,6 +13,7 @@ function fixture() {
   const store: WalletLoginStore = {
     async put(c) { challenges.set(c.id, c); }, async get(id) { return challenges.get(id); },
     async consume(id, hash, expires) { if (!challenges.delete(id)) return false; sessions.set(hash, expires); return true; },
+    async session(hash) { const expiresAt = sessions.get(hash); return expiresAt ? { address: account.address, expiresAt } : undefined; },
     async revoke(hash) { sessions.delete(hash); },
   };
   const login = new WalletLogin(origin, store);
@@ -24,6 +25,40 @@ function fixture() {
   return { login, challenges, sessions, store, app, post, gateway };
 }
 describe("wallet login", () => {
+  it("restores a signed session across navigation without extending its expiry", async () => {
+    const f = fixture(), challenge = await f.login.challenge(account.address);
+    const signature = await account.signMessage({ message: challenge.message });
+    const response = await f.post("/v1/auth/wallet/verify", { id: challenge.id, signature });
+    expect(response.status).toBe(200);
+    const session = await response.json();
+    const cookie = response.headers.get("set-cookie")!;
+    expect(cookie).toContain("HttpOnly"); expect(cookie).toContain("Secure"); expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).toContain("Path=/api/v1/auth/wallet");
+    const resume = (address = account.address, from = origin) => f.app.request("/v1/auth/wallet/resume", {
+      method: "POST", headers: { origin: from, cookie: cookie.split(";")[0]!, "content-type": "application/json" }, body: JSON.stringify({ address }),
+    });
+    const restored = await resume(); expect(restored.status).toBe(200);
+    expect(await restored.json()).toEqual({ ...session, address: account.address });
+    expect(restored.headers.get("set-cookie")).toBeNull();
+    expect((await resume(account.address, "https://evil.example")).status).toBe(401);
+    expect((await resume(`0x${"22".repeat(20)}`)).status).toBe(401);
+    f.sessions.set(sha256Hex(session.token), new Date(0));
+    expect((await resume()).status).toBe(401);
+    await f.login.logout(session.token);
+    expect((await resume()).status).toBe(401);
+  });
+  it("revokes cookie login on explicit logout and preserves a newer cookie during stale logout", async () => {
+    const f = fixture(), challenge = await f.login.challenge(account.address);
+    const session = await f.login.verify(challenge.id, await account.signMessage({ message: challenge.message }));
+    const logout = (token?: string) => f.app.request("/v1/auth/wallet/logout", { method: "POST",
+      headers: { origin, cookie: `__Secure-enclave-login=${session.token}`, ...(token ? { "x-api-key": token } : {}) } });
+    const stale = await logout(`enws_${"cc".repeat(32)}`);
+    expect(stale.headers.get("set-cookie")).toBeNull();
+    expect(f.sessions.size).toBe(1);
+    const result = await logout();
+    expect(result.status).toBe(200); expect(result.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(f.sessions.size).toBe(0);
+  });
   it("issues a scoped message, verifies it and stores only a token hash", async () => {
     const f = fixture(), c = await f.login.challenge(account.address);
     expect(parseSiweMessage(c.message)).toMatchObject({ address: account.address, domain: "enclaveagent.tech", chainId: 5042, nonce: c.id });

@@ -12,7 +12,7 @@ export interface BrowserProvider {
   on(event: string, listener: (...args: unknown[]) => void): void;
   removeListener(event: string, listener: (...args: unknown[]) => void): void;
 }
-export type BrowserWallet = { id: string; name: string; provider: BrowserProvider };
+export type BrowserWallet = { id: string; name: string; rdns?: string; provider: BrowserProvider };
 function isProvider(value: unknown): value is BrowserProvider {
   if (!value || typeof value !== "object") return false;
   return "request" in value && typeof value.request === "function" && "on" in value && typeof value.on === "function"
@@ -23,14 +23,14 @@ export function discoverWallets(target: Window, update: (wallets: BrowserWallet[
   const wallets = new Map<string, BrowserWallet>();
   function announce(event: Event) {
     if (!(event instanceof CustomEvent)) return;
-    const result = z.object({ info: z.object({ uuid: z.string().uuid(), name: z.string().trim().min(1).max(80) }), provider: z.unknown() }).safeParse(event.detail);
+    const result = z.object({ info: z.object({ uuid: z.string().uuid(), rdns: z.string().min(1).max(200).optional(), name: z.string().trim().min(1).max(80) }), provider: z.unknown() }).safeParse(event.detail);
     if (!result.success || !isProvider(result.data.provider) || wallets.size >= 100) return;
     const { info, provider } = result.data;
     if (wallets.has(info.uuid)) return;
     if (wallets.get("browser-wallet")?.provider === provider) wallets.delete("browser-wallet");
     if ([...wallets.values()].some(wallet => wallet.provider === provider)) return;
     // Names are untrusted display text. Never inject wallet-provided HTML or SVG.
-    wallets.set(info.uuid, { id: info.uuid, name: info.name, provider });
+    wallets.set(info.uuid, { id: info.uuid, name: info.name, ...(info.rdns ? { rdns: info.rdns } : {}), provider });
     update([...wallets.values()]);
   }
   target.addEventListener("eip6963:announceProvider", announce);

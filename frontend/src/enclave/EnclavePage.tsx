@@ -83,6 +83,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
   return (
     <>
       {path === "/" ? <style dangerouslySetInnerHTML={{ __html: homeStyles }} /> : null}
+      {path !== "/dashboard/" && <aside className="deployment-notice" aria-label="Release status">Development pilot · Local test settlement · <a href="/status">View deployment status</a></aside>}
       <div id="site-document" style={{ display: "contents" }} dangerouslySetInnerHTML={{ __html: markup }} />
       {path === "/dashboard/" ? <WalletConnectControl /> : null}
     </>

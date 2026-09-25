@@ -24,6 +24,15 @@ function wc() {
   return { gate, listeners, disconnect, pairingDisconnect, connect, getClient: async () => client as unknown as SignClient };
 }
 describe("browser wallet lifecycle", () => {
+  it("silently restores only the selected address and detaches without disconnecting", async () => {
+    const mock = browser(), changed = vi.fn();
+    const connection = await connectBrowserWallet(mock.wallet, new AbortController().signal, changed, first);
+    expect(mock.request.mock.calls.map(([args]) => args.method)).toEqual(["eth_accounts", "eth_chainId"]);
+    changed.mockClear(); connection.detach?.();
+    expect(mock.listeners.size).toBe(0); expect(changed).not.toHaveBeenCalled();
+    await expect(connectBrowserWallet(mock.wallet, new AbortController().signal, changed, second)).rejects.toThrow("Selected wallet changed");
+    expect(mock.listeners.size).toBe(0);
+  });
   it.each(["account", "network", "disconnect"])("rejects approval after a %s change even when the original signature is valid", async change => {
     const signer = privateKeyToAccount(`0x${"11".repeat(32)}`);
     const mock = browser(), gate = deferred<string>();
@@ -76,6 +85,24 @@ describe("browser wallet lifecycle", () => {
   });
 });
 describe("WalletConnect lifecycle", () => {
+  it("restores an approved session without a new pairing and preserves it on detach", async () => {
+    const mock = wc(), live = session(), client = await mock.getClient();
+    Object.assign(client, { session: { get: vi.fn(() => live) } });
+    const connection = await connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), async () => client, { topic: live.topic, address: first });
+    expect(mock.connect).not.toHaveBeenCalled();
+    expect(connection.account.address).toBe(first);
+    connection.detach?.(); expect(mock.disconnect).not.toHaveBeenCalled(); expect(mock.listeners.size).toBe(0);
+    const restored = await connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), async () => client, { topic: live.topic, address: first });
+    await restored.disconnect(); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+  });
+  it("rejects expired or different saved WalletConnect identities without starting a pairing", async () => {
+    const mock = wc(), live = session(), client = await mock.getClient();
+    Object.assign(client, { session: { get: () => live } });
+    await expect(connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), async () => client, { topic: live.topic, address: second })).rejects.toThrow();
+    live.expiry = 0;
+    await expect(connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), async () => client, { topic: live.topic, address: first })).rejects.toThrow();
+    expect(mock.connect).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+  });
   it("requests only the connection scope and disconnects when account approval changes", async () => {
     const mock = wc(), changed = vi.fn();
     const pending = connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), changed, mock.getClient);

@@ -28,6 +28,10 @@ try {
   const first = race.find(r => r.status === "fulfilled")!;
   assert.equal(first.status, "fulfilled");
   const token = first.status === "fulfilled" ? first.value.token : "";
+  const resumed = await login.resume(token, account.address);
+  assert.equal(resumed.token, token);
+  assert.equal(resumed.expiresAt, first.status === "fulfilled" ? first.value.expiresAt : "");
+  await assert.rejects(() => login.resume(token, other.address));
   const [row] = await testSql`select s.token_hash,s.owner_hash,k.role,k.usdc_balance from wallet_login_sessions s join api_keys k on k.key_hash=s.owner_hash`;
   assert.equal(row?.token_hash, sha256Hex(token)); assert.equal(row?.role, "wallet"); assert.equal(String(row?.usdc_balance), "0");
   assert.notEqual(row?.owner_hash, sha256Hex(account.address));
@@ -39,6 +43,7 @@ try {
   await login.verify(third.id, await other.signMessage({ message: third.message }));
   assert.equal((await testSql`select distinct owner_hash from wallet_login_sessions`).length, 2);
   await login.logout(token); assert.equal((await testSql`select token_hash from wallet_login_sessions where token_hash=${sha256Hex(token)}`).length, 0);
+  await assert.rejects(() => login.resume(token, account.address));
   const expired = await login.challenge(account.address);
   await testSql`update wallet_login_challenges set expires_at=now()-interval '1 second' where id=${expired.id}`;
   await assert.rejects(() => login.verify(expired.id, signature));

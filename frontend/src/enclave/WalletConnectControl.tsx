@@ -5,6 +5,8 @@ import { connectionNetworks, discoverWallets, fetchWalletDirectory, networkName,
 import "./wallet.css";
 import arc from "./arc-mainnet.json";
 import { setPaymentWallet, walletChanged } from "./wallet-runtime";
+import { rememberWallet, forgetWallet, restoreWallet } from "./wallet-persistence";
+import { logoutWallet } from "./wallet-auth";
 import { configuredArcPaymentPolicy } from "./arc-payment";
 
 export function WalletConnectControl() {
@@ -35,16 +37,30 @@ export function WalletConnectControl() {
   const revision = useRef(0);
   const discovery = useRef<(() => void) | null>(null);
   const alive = useRef(true);
+  const restoration = useRef<AbortController | null>(null);
 
   useEffect(() => {
     alive.current = true;
     setTarget(document.getElementById("wallet-connect-root"));
+    const restoreAbort = new AbortController(); restoration.current = restoreAbort;
+    const current = revision.current;
+    void restoreWallet(restoreAbort.signal, value => {
+      if (!alive.current || current !== revision.current) return;
+      setAccount(value); walletChanged();
+      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null); }
+    }).then(result => {
+      if (!result) return;
+      if (!alive.current || current !== revision.current) { result.detach?.(); return; }
+      connection.current = result; setPaymentWallet(result); setAccount(result.account);
+      setNotice("Wallet connection restored.");
+    }).catch(() => {});
     return () => {
+      restoreAbort.abort();
       alive.current = false; revision.current++; attempt.current?.abort(); discovery.current?.();
       discovery.current = null;
-      void connection.current?.disconnect().catch(() => {});
+      connection.current?.detach?.();
       connection.current = null;
-      setPaymentWallet(null);
+      setPaymentWallet(null, false);
     };
   }, []);
   useEffect(() => {
@@ -89,6 +105,7 @@ export function WalletConnectControl() {
   }
   async function connect(wallet: BrowserWallet | ListedWallet | null) {
     if (busy) return;
+    restoration.current?.abort();
     const current = ++revision.current;
     const controller = new AbortController(); attempt.current?.abort(); attempt.current = controller;
     setBusy(true); setError(""); setNotice("");
@@ -98,7 +115,7 @@ export function WalletConnectControl() {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
       walletChanged();
-      if (!value) { connection.current = null; setPaymentWallet(null); setNotice("Wallet disconnected. Connect again to continue."); }
+      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null); setNotice("Wallet disconnected. Connect again to continue."); }
     };
     try {
       const result = browser ? await connectBrowserWallet(browser, controller.signal, changed)
@@ -107,6 +124,7 @@ export function WalletConnectControl() {
         }, changed);
       if (!alive.current || controller.signal.aborted || current !== revision.current) { await result.disconnect(); return; }
       connection.current = result;
+      rememberWallet(result, browser);
       setPaymentWallet(result);
       setAccount(result.account); setOpen(false); setUri(""); setQr("");
       dialog.current?.close(); trigger.current?.focus();
@@ -116,6 +134,9 @@ export function WalletConnectControl() {
     } finally { if (alive.current && current === revision.current) { setBusy(false); attempt.current = null; } }
   }
   async function disconnect() {
+    restoration.current?.abort();
+    forgetWallet();
+    void logoutWallet("").catch(() => {});
     revision.current++; attempt.current?.abort();
     const previous = connection.current; connection.current = null;
     setPaymentWallet(null);

@@ -19,7 +19,8 @@ let token;
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  let signatures = 0;
+  let signatures = 0, accountPrompts = 0;
+  await page.exposeFunction('countAccountPrompt', () => { accountPrompts++; });
   await page.exposeFunction('signLoginFixture', async raw => {
     const message = hexToString(raw), fields = parseSiweMessage(message);
     if (fields.domain !== 'enclaveagent.tech' || fields.uri !== `${origin}/dashboard` || fields.address !== account.address || fields.chainId !== 5042) throw Error('Unexpected login scope');
@@ -31,6 +32,7 @@ try {
     const listeners = new Map();
     const provider = {
       async request({ method, params }) {
+        if (method === 'eth_requestAccounts') await window.countAccountPrompt();
         if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [selected];
         if (method === 'eth_chainId') return '0x13b2';
         if (method === 'personal_sign') return window.signLoginFixture(params[0]);
@@ -57,6 +59,15 @@ try {
   await expect(page.locator('#metric-calls')).toHaveText('0');
   await expect(page.locator('#run-inference')).toBeDisabled();
   expect(signatures).toBe(1);
+  for (const route of ['/', '/dashboard']) await page.goto(`${origin}${route}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#wallet-login-status')).toContainText('Signed in');
+  await expect(page.getByRole('button', { name: 'Disconnect wallet', exact: true })).toBeVisible();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#wallet-login-status')).toContainText('Signed in');
+  expect(signatures).toBe(1); expect(accountPrompts).toBe(1);
+  const cookies = await page.context().cookies();
+  expect(cookies.find(c => c.name === '__Secure-enclave-login')).toMatchObject({ httpOnly: true, secure: true, sameSite: 'Strict', path: '/api/v1/auth/wallet' });
+  expect(await page.evaluate(() => document.cookie)).not.toContain(token);
   const state = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
   expect(JSON.stringify(state)).not.toContain(token);
   const blocked = await page.request.post(`${origin}/api/v1/x402/settle`, { headers: { 'x-api-key': token }, data: {} });
@@ -66,7 +77,7 @@ try {
   await expect(page.locator('#connection-status')).toHaveText('Disconnected');
   await expect.poll(async () => (await page.request.get(`${origin}/api/v1/workspace`, { headers: { 'x-api-key': token } })).status()).toBe(401);
   expect(errors).toEqual([]);
-  console.log(JSON.stringify({ origin, walletLogin: 'passed', personalSignatures: signatures, workspaceIsolation: 'passed', pilotSpendingBlocked: true, accountChangeLogout: 'passed', credentialsInStorage: false, paidRequests: 0, runtimeErrors: [] }));
+  console.log(JSON.stringify({ origin, walletLogin: 'passed', navigationAndReload: 'passed', personalSignatures: signatures, accountPrompts, workspaceIsolation: 'passed', pilotSpendingBlocked: true, accountChangeLogout: 'passed', credentialsInStorage: false, paidRequests: 0, runtimeErrors: [] }));
 } finally {
   if (token) await fetch(`${origin}/api/v1/auth/wallet/logout`, { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-api-key': token }, body: '{}', signal: AbortSignal.timeout(10_000) }).catch(() => {});
   await browser.close();

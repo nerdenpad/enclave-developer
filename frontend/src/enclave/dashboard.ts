@@ -1,7 +1,7 @@
 import { EnclaveClient, ApiError, canSettleLocally, type Health, type Workspace, type WorkspaceReceipt, type Model, type Policies, type PreparedInference, type VerifiedInference, type InferenceStep } from "./api";
 import { configuredArcPaymentPolicy } from "./arc-payment";
 import { paymentWallet, onWalletChanged } from "./wallet-runtime";
-import { loginWallet, logoutWallet, walletLoginAvailable } from "./wallet-auth";
+import { loginWallet, logoutWallet, resumeWallet, walletLoginAvailable } from "./wallet-auth";
 import arc from "./arc-mainnet.json";
 
 const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -269,11 +269,38 @@ export function mountDashboard(): () => void {
   on("#execution-mode", "change", () => { $("#agent-choice").hidden = select("#execution-mode").value !== "agent"; });
   on("#receipt-search", "input", renderReceipts);
   on("#disconnect-gateway", "click", () => { clearWorkspace(); notify("Workspace disconnected. Local secrets cleared."); });
+  let restoreAttempted = false;
+  async function restoreLogin() {
+    if (restoreAttempted || walletToken || signingIn || life.signal.aborted) return;
+    let wallet; try { wallet = paymentWallet(); } catch { return; }
+    restoreAttempted = true;
+    const generation = loginGeneration, version = ++connectionVersion;
+    try {
+      const session = await resumeWallet(wallet);
+      if (!session || life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
+      walletToken = session.token;
+      await connectWorkspace(session.token, "/api", version);
+      if (life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
+      applyWalletSession(session.expiresAt);
+    } catch { if (!life.signal.aborted && generation === loginGeneration && walletToken) clearWorkspace(); }
+  }
+  function applyWalletSession(expiresAt: string) {
+    loginExpiry = setTimeout(() => { clearWorkspace(); notify("Your wallet login expired. Sign in again."); }, Math.max(0, Date.parse(expiresAt) - Date.now()));
+    text("#connection-note", "Signed in with your wallet. Login survives navigation and expires 30 minutes after signing.");
+    text("#wallet-login-status", "Signed in. Payments are confirmed separately in your wallet.");
+    if (health?.paymentMode !== "authorized" || health.chainId !== 5042) {
+      $<HTMLButtonElement>("#run-inference").disabled = true;
+      text("#request-note", "Wallet login is available. Public inference and real payments are not enabled on this pilot yet.");
+    }
+    $$<HTMLButtonElement>("[data-requires-connection]").filter(button => button.id !== "run-inference").forEach(button => { button.disabled = true; });
+  }
   const stopWalletListener = onWalletChanged(() => {
     loginGeneration++;
     if (walletToken) { clearWorkspace(); notify("Wallet changed. Sign in again to load its workspace."); }
+    else void restoreLogin();
   });
   void walletLoginAvailable().then(available => { if (!life.signal.aborted) { $("#wallet-login-panel").hidden = !available; $<HTMLDetailsElement>("#operator-access").open = !available; } });
+  void restoreLogin();
   on("#wallet-login", "click", () => {
     if (signingIn) return;
     clearWorkspace(); const generation = ++loginGeneration, version = ++connectionVersion;
@@ -287,14 +314,7 @@ export function mountDashboard(): () => void {
       walletToken = session.token;
       await connectWorkspace(session.token, "/api", version);
       if (!current()) return;
-      loginExpiry = setTimeout(() => { clearWorkspace(); notify("Your wallet login expired. Sign in again."); }, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
-      text("#connection-note", "Signed in with your wallet. This session stays in this tab and expires after 30 minutes.");
-      text("#wallet-login-status", "Signed in. Payments are confirmed separately in your wallet.");
-      if (health?.paymentMode !== "authorized" || health.chainId !== 5042) {
-        $<HTMLButtonElement>("#run-inference").disabled = true;
-        text("#request-note", "Wallet login is available. Public inference and real payments are not enabled on this pilot yet.");
-      }
-      $$<HTMLButtonElement>("[data-requires-connection]").filter(button => button.id !== "run-inference").forEach(button => { button.disabled = true; });
+      applyWalletSession(session.expiresAt);
     })().catch((error: unknown) => {
       if (generation === loginGeneration && !life.signal.aborted) { clearWorkspace(); text("#connection-error", message(error)); text("#wallet-login-status", "Sign-in was not completed. You can try again."); }
     }).finally(() => { signingIn = false; if (!life.signal.aborted) $<HTMLButtonElement>("#wallet-login").disabled = false; });
@@ -417,5 +437,5 @@ export function mountDashboard(): () => void {
   const timer = setInterval(() => { if (!document.hidden && client && !pending && !busy && !historyExpanded && !paginationBusy) void refresh(true); }, 5000);
   navigate(new URLSearchParams(location.search).get("view") ?? "inference");
   root.setAttribute("data-workspace-ready", "true");
-  return () => { life.abort(); stopWalletListener(); loginGeneration++; clearTimeout(loginExpiry); if (walletToken) void logoutWallet(walletToken).catch(() => {}); walletToken = null; client?.disconnect(); clearInterval(timer); clearTimeout(toastTimer); lastResult?.outputBytes.fill(0); const secret = document.querySelector<HTMLInputElement>("#view-key-secret"); if (secret) secret.value = ""; };
+  return () => { life.abort(); stopWalletListener(); loginGeneration++; clearTimeout(loginExpiry); walletToken = null; client?.disconnect(); clearInterval(timer); clearTimeout(toastTimer); lastResult?.outputBytes.fill(0); const secret = document.querySelector<HTMLInputElement>("#view-key-secret"); if (secret) secret.value = ""; };
 }
