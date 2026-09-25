@@ -1,9 +1,8 @@
 import { chromium, expect } from '@playwright/test';
 import { existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import ffmpeg from 'ffmpeg-static';
+import { exportSimulation } from './export-simulation.mjs';
 
 // Real local API, database and Anvil transactions. Only computation/attestation
 // use the existing development fixture. Never edits or mocks browser responses.
@@ -52,6 +51,10 @@ try {
   await expect(page.locator('#connection-status')).toContainText('Connected');
   await expect(page.locator('#environment-badge')).toContainText('LOCAL ECHO');
   const initialCalls = Number(await page.locator('#metric-calls').innerText());
+  // Let Chromium emit full-size frames before choosing the public clip start.
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot();
+  await page.waitForTimeout(1000);
   await caption('Connected to the local backend', 'The dashboard reads model configuration, payment settings and history from the running gateway.');
   await page.getByRole('tab', { name: 'Models', exact: true }).click();
   await expect(page.locator('#model-cards')).toContainText('SERVING NOW');
@@ -107,14 +110,6 @@ try {
   writeFileSync(path.join(output, 'verification.json'), JSON.stringify({ passed, mode: 'simulation', provider: 'echo', chainId: 31337, paymentMode: 'mock', realUsdcSpent: 0, gpuInferenceCalls: 0, durationSeconds, scenes, responses, errors }, null, 2));
 }
 if (!passed) throw Error(`Simulation recording failed. Inspect ${output}; no publishable MP4 was produced.`);
-const time = seconds => { const n=Math.floor(seconds*100); return `${Math.floor(n/360000)}:${String(Math.floor(n/6000)%60).padStart(2,'0')}:${String(Math.floor(n/100)%60).padStart(2,'0')}.${String(n%100).padStart(2,'0')}`; };
-const safe = s => s.replace(/[{}\\\r\n]/g, ' ');
-const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,25,&H00FFFFFF,&H00FFFFFF,&H00292019,&H00292019,0,0,0,0,100,100,0,0,1,0,0,2,70,70,26,1\nStyle: Disclosure,Arial,23,&H005BCCFF,&H005BCCFF,&H00292019,&H00292019,-1,0,0,0,100,100,0,0,3,10,0,8,40,40,12,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
-const cues = scenes.map((s,i) => `Dialogue: 0,${time(s.seconds)},${time(scenes[i+1]?.seconds ?? durationSeconds)},Default,,0,0,0,,{\\b1\\fs30}${safe(s.title)}{\\b0\\fs25}\\N${safe(s.detail)}`);
-// Always visible, including scene changes and UI waits. Cannot export without it.
-cues.push(`Dialogue: 1,0:00:00.00,${time(durationSeconds+10)},Disclosure,,0,0,0,,SIMULATION | No GPU inference | Test tokens only | Local chain 31337`);
-writeFileSync(path.join(output, 'captions.ass'), header+cues.join('\n'));
-const result = spawnSync(ffmpeg, ['-hide_banner','-loglevel','warning','-nostdin','-i','source.webm','-vf','pad=1920:1080:0:50:color=0x192029,ass=captions.ass','-c:v','libx264','-preset','medium','-crf','19','-pix_fmt','yuv420p','-r','30','-movflags','+faststart','-an','Enclave-Simulation.mp4'], { cwd: output, encoding: 'utf8', windowsHide: true });
-if (result.status !== 0) throw Error(result.stderr || 'Video export failed.');
-writeFileSync(path.join(output, 'Publication-notes.txt'), 'Development simulation. No GPU inference or real-USDC payment is demonstrated. Actual local gateway/database, signed receipts and Anvil test-token transactions. Keep the permanent disclosure visible when sharing.\n');
-console.log(JSON.stringify({ passed, output: path.join(output, 'Enclave-Simulation.mp4'), gpuInferenceCalls: 0, realUsdcSpent: 0 }));
+const published = exportSimulation(output);
+writeFileSync(path.join(output, 'Publication-notes.txt'), 'Development simulation. No GPU inference or real-USDC payment. Keep the permanent disclosure visible when sharing.\n');
+console.log(JSON.stringify({ passed, output: published, gpuInferenceCalls: 0, realUsdcSpent: 0 }));

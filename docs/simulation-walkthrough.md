@@ -35,7 +35,7 @@ does not produce an MP4.
 
 Output is saved under `frontend/recordings/simulation-<timestamp>/`:
 
-- `Enclave-Simulation.mp4`: English captions and a permanent simulation label.
+- `Enclave-Simulation-FullHD.mp4`: 1920×1080, English captions and a permanent simulation label. The clip starts after the browser has reached its full viewport size.
 - `simulation-receipt.json`: the actual local receipt.
 - `verification.json`: HTTP status evidence and checks, with no credentials.
 - Screenshots and publication notes.
@@ -43,6 +43,16 @@ Output is saved under `frontend/recordings/simulation-<timestamp>/`:
 Keep the simulation label visible when sharing. A successful local receipt
 signature proves software signing in this environment, not hardware execution.
 This recording is separate from the live-provider recorder and its export gates.
+
+Re-export an existing successful simulation without running another request:
+
+```sh
+node frontend/scripts/export-simulation.mjs frontend/recordings/simulation-<timestamp>
+```
+
+The export removes browser startup frames, adjusts caption timing and preserves
+the original recording and verification evidence. Existing MP4 files are never
+overwritten.
 
 Stop the launcher with Ctrl+C, then run `npm run demo:stop` to stop its three
 containers without deleting their data. Use `npm run dev` to return to the saved
