@@ -32,8 +32,8 @@ and **cancelled the confidential-VM requirement**. Keys stay in software on the 
 That decision does not settle USDC and does not complete a hosted inference.
 
 Hosted inference is waiting on NVIDIA: their attestation service returns HTTP 403 to
-the VPS, and strict verification stays on. Settlement is still MockUSDC on a private
-chain. Real USDC on Arc is the remaining payment work.
+the VPS, and strict verification stays on. Arc contracts are live and the API uses
+authorized settlement; public browser checkout stays off until that inference path works.
 
 What is live and what is still open is published in the
 [roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).
@@ -55,4 +55,4 @@ a finished confidential deployment.
 **[enclave-developer](https://github.com/nerdenpad/enclave-developer)** — the frontend,
 the backend and the contracts, together on `main`.
 
-<sub>Software gateway, accepted as the production host. Confidential VM is not required. This deployment does not yet settle real USDC, and hosted inference is waiting on NVIDIA.</sub>
+<sub>Software gateway, accepted as the production host. Confidential VM is not required. Arc settlement is configured; public checkout stays off while hosted inference waits on NVIDIA.</sub>

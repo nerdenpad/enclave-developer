@@ -22,10 +22,10 @@ says what that does not prove.
 > Hosted inference is waiting on NVIDIA. Their attestation service returns HTTP 403
 > to the VPS, and strict verification stays on until that access is restored.
 >
-> Payments are still MockUSDC on a private chain. Real USDC on Arc is the remaining
-> payment work: funded wallets, deployed contracts and one accepted small payment.
-> See [payment launch](docs/payment-launch.md). What is live and what is still open
-> is in the [roadmap](docs/roadmap.md).
+> Arc contracts are deployed and the hosted API settles on chain `5042` with a
+> funded software relay. Public browser checkout stays off until a hosted inference
+> request completes. See [payment launch](docs/payment-launch.md). What is live and
+> what is still open is in the [roadmap](docs/roadmap.md).
 
 ## Links
 

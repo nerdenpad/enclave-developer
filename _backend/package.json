@@ -24,6 +24,7 @@
     "up": "docker compose up -d postgres redis anvil",
     "contracts:compile": "tsx scripts/compile-contracts.ts",
     "contracts:deploy": "tsx scripts/deploy-local.ts",
+    "contracts:deploy-arc": "node scripts/deploy-arc.mjs",
     "typecheck": "tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/db/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/worker/tsconfig.json && npm run typecheck -w @enclave/agent-sdk",
     "test:integration": "tsx scripts/test-integration.ts",
     "test:contracts": "tsx scripts/contracts-test.ts",

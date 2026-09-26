@@ -1,6 +1,6 @@
 # Payment launch preparation
 
-Reviewed on 24 September 2026. WalletConnect is already configured under the supplied project. No replacement account, disposable email address or additional Project ID is needed. Pricing approval is deferred; paid checkout stays disabled.
+Reviewed on 26 September 2026. WalletConnect is already configured under the supplied project. Arc contracts are deployed; the hosted API uses authorized Arc settlement with the dedicated relay. Pricing approval is deferred; public browser checkout stays disabled until hosted inference is unblocked.
 
 ## Operator inputs
 
@@ -41,7 +41,7 @@ For operating planning, 750,000 gas per complete paid request at five times the 
 
 ## Remaining implementation and acceptance
 
-- Produce a mainnet deployment plan with explicit owners and addresses. Existing `contracts:deploy` is a local-only workflow using mock contracts and bootstrap approvals; it must not be repurposed by changing its RPC. Deploy under customer control and explicitly configure the dedicated relay.
+- Arc Mainnet contracts are deployed. Record: ignored `.local/arc-deployment.json` locally and `/opt/enclave/_backend/data/arc-deployment.json` on the host. Local `contracts:deploy` remains Anvil-only; Arc uses `contracts:deploy-arc`.
 - Confirm revenue allocation. FeeVault currently splits funds 80/10/5/5, and model listings can take an additional provider share first. Do not treat all client payments as treasury revenue, secretly route allocation addresses to one wallet, or infer a new token supply from budget examples.
 - Approve a price after measuring model costs, network fees, failed-request costs and the treasury share. The 0.10 USDC development price is not a commercial tariff. No price or fee allocation was changed.
 - Complete real-token settlement/recovery acceptance. Browser payment signing is implemented behind a disabled release flag. Public EOA login now uses a separate SIWE signature and expiring session; connecting alone does not authenticate a user. Public logins cannot spend pilot resources. The receipt signer remains in software until confidential infrastructure is available; keep that limitation visible.

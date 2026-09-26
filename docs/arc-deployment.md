@@ -1,8 +1,8 @@
 # Arc Mainnet deployment
 
-Arc Mainnet is the selected USDC settlement network. The public pilot still uses private Anvil and MockUSDC. Selecting Arc in the browser does not migrate that backend or enable real payments.
+Arc Mainnet is the selected USDC settlement network. Contracts were deployed on 26 September 2026 against the reviewed USDC token. The hosted API and worker now use chain `5042` with `PAYMENT_MODE=authorized` and the dedicated software relay. Public browser checkout remains disabled (`VITE_ARC_PAYMENTS_ENABLED=false`) until a hosted inference path is accepted.
 
-See [payment launch preparation](payment-launch.md) for wallet roles, the starting reserve and read-only funding checks. Pricing approval is currently deferred.
+See [payment launch preparation](payment-launch.md) for wallet roles and the deployment record. Pricing approval is currently deferred.
 
 ## Reviewed public parameters
 

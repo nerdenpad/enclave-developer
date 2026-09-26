@@ -1,6 +1,6 @@
 # E1 release acceptance
 
-E1 status: **open**. The customer accepted the software gateway at https://enclaveagent.tech as the production host on 26 September 2026 and cancelled the confidential-VM requirement. Keys stay in software. Settlement is still MockUSDC on a private chain. Hosted inference is waiting on NVIDIA: NRAS returns HTTP 403 to the VPS, and strict verification stays enabled. A GitHub push is source delivery, not deployment by itself.
+E1 status: **open**. The customer accepted the software gateway at https://enclaveagent.tech as the production host on 26 September 2026 and cancelled the confidential-VM requirement. Keys stay in software. Arc Mainnet contracts are deployed and the API uses authorized settlement; public browser checkout stays disabled. Hosted inference is waiting on NVIDIA: NRAS returns HTTP 403 to the VPS, and strict verification stays enabled. A GitHub push is source delivery, not deployment by itself.
 
 ## Available now
 
@@ -17,7 +17,7 @@ E1 status: **open**. The customer accepted the software gateway at https://encla
 | Composite attestation and protected key release | NEAR provider verification; software gateway accepted by the customer on 26 September 2026 | Confidential VM is no longer a release requirement. Hosted GPU attestation is still blocked by NVIDIA HTTP 403. |
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the production signer and request path on the accepted hardware |
 | On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI; Arc Mainnet selected | Approve policies, deploy contracts on Arc, bind signer and record addresses; test anchoring and confirmations there |
-| USDC without duplicate charge/execution | MockUSDC, EIP-3009/x402 and recovery tests; Arc USDC read-only domain preflight passes | Fund deployment/relay wallets, verify write-path compatibility, implement browser payment authorization and exercise real-network restart/recovery |
+| USDC without duplicate charge/execution | Arc contracts deployed; API `authorized` on `5042`; relay funded; browser checkout flag still false | One accepted small real-USDC browser payment with restart/recovery evidence; then enable the public checkout flag |
 | Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
 | Production mode | Software host accepted; the process still rejects `NODE_ENV=production` | The guard means "hardware TEE adapter", which is no longer the release rule. Leave it in place until the status it would publish matches Arc USDC settlement and a completed hosted inference. Do not remove it only to print a production label. |
 | Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |

@@ -8,7 +8,7 @@ The root [README](../../README.md) is the public entry point. Detailed setup sta
 
 About description:
 
-> Inference with signed receipts. The customer accepted the software gateway as the production host on 26 September 2026 and cancelled the confidential-VM requirement. Hosted inference is waiting on NVIDIA, and settlement is still MockUSDC.
+> Inference with signed receipts. The customer accepted the software gateway as the production host on 26 September 2026 and cancelled the confidential-VM requirement. Arc settlement is configured; hosted inference is waiting on NVIDIA.
 
 Website: https://enclaveagent.tech
 

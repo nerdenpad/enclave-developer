@@ -10,7 +10,7 @@ Status reviewed on 26 September 2026. Milestones are tied to acceptance evidence
 | Deployment transparency | Implemented | Public `/status` page with configured network, model, policy and limits |
 | Hosted inference acceptance | Blocked | Successful strict CPU/GPU verification, model response and independently checked receipt from the hosted path |
 | Confidential gateway and key custody | Cancelled by the customer, 26 September 2026 | The software VPS gateway is the accepted host. Hardware key custody is not a release requirement. |
-| Public-chain settlement | Arc Mainnet selected; deployment and acceptance pending | Read-only USDC domain checks pass; contract deployment, browser payment authorization and restart/recovery tests remain. See [Arc configuration](arc-deployment.md) |
+| Public-chain settlement | Contracts deployed; public checkout still disabled | Arc `5042` UsageMeter and related contracts live; API `authorized`. One accepted small real-USDC browser payment remains. See [Arc configuration](arc-deployment.md) |
 | Wallet connections | Browser connection, Arc switching and WalletConnect configured | Hosted check loaded 77 Arc-filtered catalog entries, received a relay response and displayed a cancellable QR code. Real-wallet approval and payment compatibility acceptance remain. See [scope and acceptance](wallet-payments.md) |
 | Production user access | Pending | Deployed user authentication and receipt ownership checks |
 | E1 release | Open | NVIDIA attestation access and Arc USDC settlement remain. See the [acceptance matrix](e1-release.md). |
@@ -21,6 +21,6 @@ Resolve NVIDIA attestation-service access from the hosting network, review any e
 
 ## After the host decision
 
-The customer cancelled confidential-VM custody. Remaining work is NVIDIA attestation access from the VPS, then Arc USDC settlement. Migration to Phala is not part of this deployment.
+The customer cancelled confidential-VM custody. Arc contracts and authorized API settlement are in place. Remaining work is NVIDIA attestation access from the VPS, then one accepted browser payment with public checkout still off until then. Migration to Phala is not part of this deployment.
 
 Release documentation will record the deployed code revision, network, contract addresses, model and reviewed policy versions alongside the acceptance evidence. A completed hosted inference and a real USDC payment are still required before those claims are closed.
