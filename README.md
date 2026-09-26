@@ -13,15 +13,19 @@ pilot are MockUSDC on a private Anvil chain, not USDC. **A valid signature says 
 configured signer signed those hashes** — the [status page](https://enclaveagent.tech/status)
 says what that does not prove.
 
-> ### This is a software pilot
+> ### Production host
 >
-> E1 is **not released**. The site is [enclaveagent.tech](https://enclaveagent.tech).
-> As of 25 September 2026, hosted inference is blocked: NVIDIA's attestation service
-> returns HTTP 403 to the VPS, and strict verification stays on. A local walkthrough
-> with a signed receipt is not evidence that the hosted path completed inference.
+> On 26 September 2026 the customer accepted this software gateway as the production
+> host and **cancelled the confidential-VM requirement**. Keys stay in software on the
+> VPS. That decision does not settle USDC and does not complete a hosted inference.
 >
-> What is live, what is blocked and what has to be true before release is published
-> in the [roadmap](docs/roadmap.md), without dates and with a way to check each claim.
+> Hosted inference is waiting on NVIDIA. Their attestation service returns HTTP 403
+> to the VPS, and strict verification stays on until that access is restored.
+>
+> Payments are still MockUSDC on a private chain. Real USDC on Arc is the remaining
+> payment work: funded wallets, deployed contracts and one accepted small payment.
+> See [payment launch](docs/payment-launch.md). What is live and what is still open
+> is in the [roadmap](docs/roadmap.md).
 
 ## Links
 

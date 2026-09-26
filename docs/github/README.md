@@ -8,7 +8,7 @@ The root [README](../../README.md) is the public entry point. Detailed setup sta
 
 About description:
 
-> Inference with signed receipts, attestation checks and on-chain verification. Gateway keys stay in software, and the status page says what a signature does not prove. Software pilot.
+> Inference with signed receipts. The customer accepted the software gateway as the production host on 26 September 2026 and cancelled the confidential-VM requirement. Hosted inference is waiting on NVIDIA, and settlement is still MockUSDC.
 
 Website: https://enclaveagent.tech
 

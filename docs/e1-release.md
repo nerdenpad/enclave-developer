@@ -1,6 +1,6 @@
 # E1 release acceptance
 
-E1 status: **not released**. A software pilot is hosted at https://enclaveagent.tech. It is configured for NEAR inference, software gateway keys and local-chain test settlement. As of 24 September 2026, hosted inference is blocked by NVIDIA NRAS HTTP 403 from the VPS; strict verification remains enabled. A GitHub push is source delivery, not deployment by itself.
+E1 status: **open**. The customer accepted the software gateway at https://enclaveagent.tech as the production host on 26 September 2026 and cancelled the confidential-VM requirement. Keys stay in software. Settlement is still MockUSDC on a private chain. Hosted inference is waiting on NVIDIA: NRAS returns HTTP 403 to the VPS, and strict verification stays enabled. A GitHub push is source delivery, not deployment by itself.
 
 ## Available now
 
@@ -14,22 +14,22 @@ E1 status: **not released**. A software pilot is hosted at https://enclaveagent.
 | Requirement | Current evidence | Remaining work before release |
 | --- | --- | --- |
 | Public HTTPS prompt flow | Hosted pilot, HTTPS and a separate non-admin pilot API key; local browser tests | Production user authentication and acceptance on the final infrastructure |
-| Composite attestation and protected key release | NEAR provider verification; software gateway | Provision a customer-controlled confidential VM; implement its hardware adapter, measurement-bound key release and encrypted recovery; verify negative cases on that hardware |
+| Composite attestation and protected key release | NEAR provider verification; software gateway accepted by the customer on 26 September 2026 | Confidential VM is no longer a release requirement. Hosted GPU attestation is still blocked by NVIDIA HTTP 403. |
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the production signer and request path on the accepted hardware |
 | On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI; Arc Mainnet selected | Approve policies, deploy contracts on Arc, bind signer and record addresses; test anchoring and confirmations there |
 | USDC without duplicate charge/execution | MockUSDC, EIP-3009/x402 and recovery tests; Arc USDC read-only domain preflight passes | Fund deployment/relay wallets, verify write-path compatibility, implement browser payment authorization and exercise real-network restart/recovery |
 | Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
-| Production mode | Correctly rejected by the current software adapter | Replace software custody and pass hardware/deployment acceptance; do not remove the guard as a shortcut |
+| Production mode | Software host accepted; the process still rejects `NODE_ENV=production` | The guard means "hardware TEE adapter", which is no longer the release rule. Leave it in place until the status it would publish matches Arc USDC settlement and a completed hosted inference. Do not remove it only to print a production label. |
 | Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |
 
 ## Infrastructure inputs
 
-As of 24 September 2026, a Debian 12 VPS (8 vCPU, 16 GB RAM) hosts the software pilot at `enclaveagent.tech`, with HTTPS and automatic certificate renewal. Arc Mainnet is selected for real USDC; no funded deployment/relay wallets or confidential VM have been supplied. NEAR remains the selected GPU provider. See [the single-server pilot runbook](../infra/pilot/README.md) for hosting without an E1 production claim.
+A Debian 12 VPS (8 vCPU, 16 GB RAM) hosts the accepted software gateway at `enclaveagent.tech`, with HTTPS and automatic certificate renewal. Arc Mainnet is selected for real USDC; funded deployment and relay wallets have not been supplied. NEAR remains the selected GPU provider. See [the single-server runbook](../infra/pilot/README.md).
 
 The operator must supply:
 
 1. Production hosting and a customer-approved resource budget. The pilot already has a domain, DNS and TLS ingress.
-2. Confidential VM access for our own container workload, CPU evidence format/trust roots, measured image/configuration policy, a key derivation/release interface and durable encrypted storage. A managed inference API key alone does not supply these capabilities.
+2. Confidential VM access is no longer required. The customer cancelled that requirement on 26 September 2026. The accepted host is the current software gateway on the VPS.
 3. Production RPC capacity and confirmation/finality policy for the selected Arc Mainnet, funded deployment/relay wallets and governance addresses. Public network/token parameters and the read-only preflight are recorded in [Arc deployment](arc-deployment.md).
 4. An authentication model for website users and receipt ownership. The current operator API-key field is a development facility.
 
@@ -37,9 +37,9 @@ Do not put provider keys, deployer keys, CVM keys, RPC credentials or deployment
 
 ## Deployment sequence
 
-1. Build the gateway image for the selected CVM runtime and record its immutable digest. Provision its attestation and key-release adapter; reject software or unknown adapters in production.
-2. Verify fresh CPU evidence, measured workload/configuration, key-release binding and restart recovery. Tampering, expired evidence, unapproved measurements and unavailable key release must stop execution before secrets are released.
-3. Deploy contracts on the selected network and bind the approved model/code/policy and hardware-held signer. Verify the USDC token/domain and relay routing rules. Do not use local bootstrap approvals on an external network.
+1. Restore NVIDIA attestation access from the VPS and complete one hosted inference with strict verification still enabled. A 403 response is not a completed request.
+2. Keep the software gateway as the accepted host. Do not treat cancellation of the confidential-VM requirement as hardware custody.
+3. Deploy contracts on Arc and bind the approved model, code, policy and the software signer. Verify the USDC token, domain and relay routing rules. Do not use local bootstrap approvals on an external network.
 4. Configure the site and `/api` on one HTTPS origin, server-side authentication, request limits and persistent databases. The Vite development proxy is not a public deployment configuration.
 5. Exercise a paid request on the deployed path; verify the receipt independently; anchor it; restart during uncertain payment/inference states and confirm no second debit or generation. Include model revocation, signer rotation, rejected evidence and chain reorganization cases.
 6. Publish the domain, network/contracts, model, both gateway and remote-provider policy versions, known limits and acceptance evidence. Only then enable the production CTA and describe E1 as live.

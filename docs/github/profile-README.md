@@ -25,16 +25,18 @@ selected remote GPU. **The receipt says what was signed, and the status page say
 that signature does not prove** — hardware custody, payment and a completed hosted
 inference are separate claims.
 
-### This is a software pilot
+### Production host
 
-Enclave's public deployment is a **software pilot**. E1 is not released. Gateway keys are
-not in confidential hardware. Settlement is MockUSDC on a private chain, not USDC. As of
-25 September 2026, hosted inference is blocked: NVIDIA's attestation service returns
-HTTP 403 to the VPS, and strict verification stays on.
+On 26 September 2026 the customer accepted the software gateway as the production host
+and **cancelled the confidential-VM requirement**. Keys stay in software on the VPS.
+That decision does not settle USDC and does not complete a hosted inference.
 
-What is live, what is blocked, and what has to be true before release is published in the
-[roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md) —
-without dates, and with a way to check each claim.
+Hosted inference is waiting on NVIDIA: their attestation service returns HTTP 403 to
+the VPS, and strict verification stays on. Settlement is still MockUSDC on a private
+chain. Real USDC on Arc is the remaining payment work.
+
+What is live and what is still open is published in the
+[roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).
 
 ### Three decisions worth knowing
 
@@ -53,4 +55,4 @@ a finished confidential deployment.
 **[enclave-developer](https://github.com/nerdenpad/enclave-developer)** — the frontend,
 the backend and the contracts, together on `main`.
 
-<sub>Software pilot. Gateway keys are not in confidential hardware, and this deployment does not settle real USDC.</sub>
+<sub>Software gateway, accepted as the production host. Confidential VM is not required. This deployment does not yet settle real USDC, and hosted inference is waiting on NVIDIA.</sub>

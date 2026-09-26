@@ -1,6 +1,6 @@
 # Roadmap
 
-Status reviewed on 24 September 2026. Milestones are tied to acceptance evidence rather than estimated launch dates.
+Status reviewed on 26 September 2026. Milestones are tied to acceptance evidence rather than estimated launch dates. The customer accepted the software VPS gateway as the production host and cancelled the confidential-VM requirement.
 
 | Milestone | Status | Completion evidence |
 | --- | --- | --- |
@@ -9,18 +9,18 @@ Status reviewed on 24 September 2026. Milestones are tied to acceptance evidence
 | Receipt verification | Implemented | Public `/verify` page, local signature checks and optional contract/policy/anchor checks |
 | Deployment transparency | Implemented | Public `/status` page with configured network, model, policy and limits |
 | Hosted inference acceptance | Blocked | Successful strict CPU/GPU verification, model response and independently checked receipt from the hosted path |
-| Confidential gateway and key custody | Pending infrastructure and implementation | Accepted hardware measurements, protected key release, tamper rejection and encrypted restart recovery |
+| Confidential gateway and key custody | Cancelled by the customer, 26 September 2026 | The software VPS gateway is the accepted host. Hardware key custody is not a release requirement. |
 | Public-chain settlement | Arc Mainnet selected; deployment and acceptance pending | Read-only USDC domain checks pass; contract deployment, browser payment authorization and restart/recovery tests remain. See [Arc configuration](arc-deployment.md) |
 | Wallet connections | Browser connection, Arc switching and WalletConnect configured | Hosted check loaded 77 Arc-filtered catalog entries, received a relay response and displayed a cancellable QR code. Real-wallet approval and payment compatibility acceptance remain. See [scope and acceptance](wallet-payments.md) |
 | Production user access | Pending | Deployed user authentication and receipt ownership checks |
-| E1 release | Not released | All eight requirements in the [acceptance matrix](e1-release.md) pass on the final deployment |
+| E1 release | Open | NVIDIA attestation access and Arc USDC settlement remain. See the [acceptance matrix](e1-release.md). |
 
 ## Next milestone
 
 Resolve NVIDIA attestation-service access from the hosting network, review any expired provider policy against fresh evidence, then run the hosted inference journey with strict verification enabled. A successful local demonstration does not close this milestone.
 
-## After pilot acceptance
+## After the host decision
 
-Move gateway key custody into an approved confidential runtime, deploy settlement on Arc Mainnet and complete user authentication. Migration to Phala is a planned hosting option, subject to funding and hardware acceptance; it is not part of the current deployment.
+The customer cancelled confidential-VM custody. Remaining work is NVIDIA attestation access from the VPS, then Arc USDC settlement. Migration to Phala is not part of this deployment.
 
-Release documentation will record the deployed code revision, network, contract addresses, model and reviewed policy versions alongside the acceptance evidence. The production label remains gated on that evidence.
+Release documentation will record the deployed code revision, network, contract addresses, model and reviewed policy versions alongside the acceptance evidence. A completed hosted inference and a real USDC payment are still required before those claims are closed.
