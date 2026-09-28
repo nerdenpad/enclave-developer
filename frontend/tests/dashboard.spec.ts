@@ -119,7 +119,7 @@ test("unauthorized connection shows a real error and never falls back to populat
 test("connection distinguishes NEAR GPU, software gateway and local test chain with owner history", async ({ page }) => {
   const f = await fixture(page); await connect(page);
   await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · DEVELOPMENT GATEWAY");
-  await expect(page.locator("#environment-description")).toContainText("gateway and its keys run in software");
+  await expect(page.locator("#environment-description")).toContainText(/gateway keys run in software/i);
   await expect(page.locator("#topology-chain")).toHaveText("CHAIN 31337 · TEST USDC · x402");
   await expect(page.locator("#metric-calls")).toHaveText("7");
   await expect(page.locator("#metric-usage")).toHaveText("0.700000");
@@ -254,12 +254,12 @@ test("late successful verification of receipt A cannot mark newly selected recei
     };
   });
   await page.getByRole("tab", { name: "Receipts", exact: true }).click();
-  await page.locator(`[data-receipt="${f.workspace.receipts[0]!.typedHash}"]`).click();
+  await page.locator("#receipt-rows").locator(`[data-receipt="${f.workspace.receipts[0]!.typedHash}"]`).click();
   const held = f.holdNextHealth();
   await page.locator("#verify-receipt").click(); await held.started;
   await expect(page.locator("#receipt-integrity")).toContainText("Checking");
   await page.getByRole("button", { name: "Close receipt", exact: true }).click();
-  await page.locator(`[data-receipt="${f.older.typedHash}"]`).click();
+  await page.locator("#receipt-rows").locator(`[data-receipt="${f.older.typedHash}"]`).click();
   await expect(page.locator("#receipt-fields")).toContainText(f.older.typedHash);
   held.release();
   await page.waitForFunction((typedHash) => (window as Window & { completedReceiptVerification?: string }).completedReceiptVerification === typedHash, f.workspace.receipts[0]!.typedHash);

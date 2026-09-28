@@ -17,7 +17,7 @@ Copy-Item infra/near/.env.example .env.near
 
 Copy the example only for a **new** profile; do not overwrite an existing key. Set `INFERENCE_API_KEY` in the ignored `.env.near` to a NEAR Cloud key with a small spending limit. Keep regular local database/chain settings in `.env`. Neither file belongs in Git. Linux uses `infra/near/.venv/bin/python`.
 
-The GLM development policy is time bounded and expires on 26 September 2026. It accepts only reviewed complete measurement profiles, manager action histories, GPU counts and models. Changes or new VMs require a review and an atomic policy replacement; do not regenerate an automatically trusted policy from the latest response. A versioned candidate is deliberately unapproved/expired. See [the verifier protocol and review procedure](../infra/near/README.md).
+The GLM development policy is time bounded; the current `infra/near/policy.glm-2026-09-29.json` expires at 2026-09-29T21:13:29Z. It accepts only reviewed complete measurement profiles, manager action histories, GPU counts and models. Changes or new VMs require a review and an atomic policy replacement; do not regenerate an automatically trusted policy from the latest response. A versioned candidate is deliberately unapproved/expired. See [the verifier protocol and review procedure](../infra/near/README.md).
 
 ```powershell
 # Offline vendor crypto/negative tests; no API key or inference spend:
