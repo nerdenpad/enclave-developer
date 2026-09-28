@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "version": "development-glm-2026-09-29.1",
+  "validFrom": "2026-09-28T21:12:29Z",
+  "validUntil": "2026-09-29T21:13:29Z",
+  "maxSessionSeconds": 120,
+  "profiles": [
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "appComposeSha256": "c82b1a2eaf6996154a5f39ae621643f034b082d5e51edd3d2ba6009273881d86",
+      "measurements": {
+        "tee_tcb_svn": "0b010400000000000000000000000000",
+        "mr_seam": "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d",
+        "mr_signer_seam": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "seam_attributes": "0000000000000000",
+        "td_attributes": "0000001000000000",
+        "xfam": "e702060000000000",
+        "mr_td": "df4d77c857de652bd0fafa343a2026b51071ee03773d076d283abf1a7d36ff91ffa279ee4a617ac664f7e2a2c8d5891b",
+        "mr_config_id": "01c82b1a2eaf6996154a5f39ae621643f034b082d5e51edd3d2ba6009273881d86000000000000000000000000000000",
+        "mr_owner": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "mr_owner_config": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "rt_mr0": "bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590",
+        "rt_mr1": "ff61e68fa04516b1813d2d478397a97a58f9ccc402b6d96fb73f5e5104a4acf155913caec99a0c19afc16ae0f3a77726",
+        "rt_mr2": "4d662c04766145dfe084fd014969b19c387afe9bb1d4f972c6968d28a7a8b4937c414603a2cf446105eddce67a86f9ce",
+        "rt_mr3": "37cfb6c5b7404bc40a475f3820804b3b682c96646e07cc33f69940520983d3ec034d40c836997f8728d33d5e86778116"
+      },
+      "composeManagerActionsSha256": "16e036386cb82e895e4f4f6d33283591fa3428c68be47d6bb7ecf2d9dee1acb6",
+      "composeManagerImage": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be",
+      "gpuCount": 8,
+      "gpuModels": [
+        "GH100"
+      ]
+    },
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "appComposeSha256": "945bcfade2aec53a19da7638774a99caea11395ec03e572a13357a0c63b152b4",
+      "measurements": {
+        "tee_tcb_svn": "0b010400000000000000000000000000",
+        "mr_seam": "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d",
+        "mr_signer_seam": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "seam_attributes": "0000000000000000",
+        "td_attributes": "0000001000000000",
+        "xfam": "e702060000000000",
+        "mr_td": "df4d77c857de652bd0fafa343a2026b51071ee03773d076d283abf1a7d36ff91ffa279ee4a617ac664f7e2a2c8d5891b",
+        "mr_config_id": "01945bcfade2aec53a19da7638774a99caea11395ec03e572a13357a0c63b152b4000000000000000000000000000000",
+        "mr_owner": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "mr_owner_config": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "rt_mr0": "bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590",
+        "rt_mr1": "ff61e68fa04516b1813d2d478397a97a58f9ccc402b6d96fb73f5e5104a4acf155913caec99a0c19afc16ae0f3a77726",
+        "rt_mr2": "4d662c04766145dfe084fd014969b19c387afe9bb1d4f972c6968d28a7a8b4937c414603a2cf446105eddce67a86f9ce",
+        "rt_mr3": "4c692efefa48741eccd609b3831a393e3ce38eeebaaff8df0f3e5a88fbdeea1c9afe5620a6bec00c0a88f739aaf7cfa7"
+      },
+      "composeManagerActionsSha256": "644206616d92abffb8db5aefbd43cb01032f2d3f25f0fb38dc64725ab6585869",
+      "composeManagerImage": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be",
+      "gpuCount": 8,
+      "gpuModels": [
+        "GH100"
+      ]
+    },
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "appComposeSha256": "55db164f4f8c6a837c2217c601c21bba4758f908536a6cd5b2978550205a9179",
+      "measurements": {
+        "tee_tcb_svn": "0b010400000000000000000000000000",
+        "mr_seam": "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d",
+        "mr_signer_seam": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "seam_attributes": "0000000000000000",
+        "td_attributes": "0000001000000000",
+        "xfam": "e702060000000000",
+        "mr_td": "df4d77c857de652bd0fafa343a2026b51071ee03773d076d283abf1a7d36ff91ffa279ee4a617ac664f7e2a2c8d5891b",
+        "mr_config_id": "0155db164f4f8c6a837c2217c601c21bba4758f908536a6cd5b2978550205a9179000000000000000000000000000000",
+        "mr_owner": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "mr_owner_config": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "rt_mr0": "bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590",
+        "rt_mr1": "ff61e68fa04516b1813d2d478397a97a58f9ccc402b6d96fb73f5e5104a4acf155913caec99a0c19afc16ae0f3a77726",
+        "rt_mr2": "4d662c04766145dfe084fd014969b19c387afe9bb1d4f972c6968d28a7a8b4937c414603a2cf446105eddce67a86f9ce",
+        "rt_mr3": "acb49684097878fb9ac35b2cf8bbe10c0ddbb2c1aed0b3d1e1121d8dbaa58525ce09d3c8ea546dc7fe9ef6575a0cec60"
+      },
+      "composeManagerActionsSha256": "cf8ecf361f841f7aa34838f463e6f75006f410f648b111d4cc40c4d942121feb",
+      "composeManagerImage": "nearaidev/compose-manager@sha256:6e035c8fb99c1d31f41760d25af178683a658cca4afd73cd0d366fbb5bf884be",
+      "gpuCount": 8,
+      "gpuModels": [
+        "GH100"
+      ]
+    }
+  ],
+  "provenance": {
+    "scope": "DEVELOPMENT ONLY. CPU/GPU attestation and complete exact measured profiles for three observed NEAR VMs. Relies on NEAR privileged guest control plane and compose-manager action assertions; does not prove exact running containers, immutable model weights, or production security.",
+    "reviewedAt": "2026-09-28T21:13:29Z",
+    "observedHost": "glm-5-3-flash.completions.near.ai",
+    "instances": [
+      "gpu04",
+      "gpu23",
+      "gpu03"
+    ],
+    "sourceRepository": "https://github.com/nearai/cvm-compose-files",
+    "reviewSummary": "All 19, 40, and 62 distinct action source-hash claims matched their immutable Git commits. Current W4AFP8 services have digest-pinned images; gpu04 earlier history includes local builds and unpinned images previously accepted under the development-only trust boundary. All three action histories include a temporary compose-manager image switch followed by a return to the earlier image. The action record alone does not prove command success or resolved active container state. Any changed action hash fails closed.",
+    "modelSnapshot": "graphistry/GLM-5.3-Flash-W4AFP8@99f1fa70408c52b007d4fd69e02e5a522422e755"
+  }
+}
