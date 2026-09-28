@@ -59,6 +59,11 @@ const ModelSchema = z.object({
   createdAt: date,
 });
 export type Model = z.infer<typeof ModelSchema>;
+const PublicModelSchema = ModelSchema.pick({ modelHash: true, codeHash: true, version: true,
+  approved: true, revoked: true, listingId: true, createdAt: true });
+export type PublicModel = z.infer<typeof PublicModelSchema>;
+const ArcReceiptCountSchema = z.object({ chainId: z.literal(5042), verifierAddress: address, confirmed: z.number().int().nonnegative() });
+export type ArcReceiptCount = z.infer<typeof ArcReceiptCountSchema>;
 const PolicySchema = z.object({
   version: z.number(), servingImageId: z.string(), measurement: hex32, policyHash: hex32,
   status: z.string(), binding: z.string().nullable(), scope: z.string().nullable(),
@@ -245,6 +250,8 @@ export class EnclaveClient {
   }
   async health(options: RequestOptions = {}): Promise<Health> { return parse(HealthSchema, await this.#request("/health", { ...options, auth: false })); }
   async models(options: RequestOptions = {}): Promise<Model[]> { return parse(z.array(ModelSchema), await this.#request("/v1/models", { ...options, auth: false })); }
+  async publicModels(options: RequestOptions = {}): Promise<PublicModel[]> { return parse(z.array(PublicModelSchema), await this.#request("/v1/public/models", { ...options, auth: false })); }
+  async arcReceiptCount(options: RequestOptions = {}): Promise<ArcReceiptCount> { return parse(ArcReceiptCountSchema, await this.#request("/v1/public/arc-receipts/count", { ...options, auth: false })); }
   async policies(options: RequestOptions = {}): Promise<Policies> { return parse(PoliciesSchema, await this.#request("/v1/tcb/policies", { ...options, auth: false })); }
   async verifyReceipt(record: WorkspaceReceipt, options: RequestOptions = {}): Promise<StoredReceiptVerification> {
     const receipt = parse(WorkspaceReceiptSchema, record); const health = await this.health(options);

@@ -7,6 +7,10 @@
     "title": "Deployment status — Enclave",
     "description": "Inspect the reported network, model, policy and limits of this Enclave deployment."
   },
+  "/models/": {
+    "title": "Public model registry — Enclave",
+    "description": "Inspect registered model and code hashes with their current approval status."
+  },
   "/404/": {
     "file": "404.html",
     "title": "Page not found \u2014 Enclave",

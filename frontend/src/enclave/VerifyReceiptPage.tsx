@@ -3,7 +3,7 @@ import { MAX_RECEIPT_BYTES, browserRpc, parseReceipt, trustSchema, verifyLocalRe
 import "./verification.css";
 
 export function VerificationHeader() {
-  return <header className="en-nav verification-nav"><a className="brand" href="/">Enclave</a><nav aria-label="Main navigation"><a href="/dashboard">Workspace</a><a href="/verify">Verify receipt</a><a href="/status">Deployment status</a></nav></header>;
+  return <header className="en-nav verification-nav"><a className="brand" href="/">Enclave</a><nav aria-label="Main navigation"><a href="/dashboard">Workspace</a><a href="/verify">Verify receipt</a><a href="/models">Model registry</a><a href="/status">Deployment status</a></nav></header>;
 }
 
 export function VerifyReceiptPage() {

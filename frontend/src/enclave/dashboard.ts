@@ -3,6 +3,7 @@ import { configuredArcPaymentPolicy } from "./arc-payment";
 import { paymentWallet, onWalletChanged } from "./wallet-runtime";
 import { loginWallet, logoutWallet, resumeWallet, walletLoginAvailable } from "./wallet-auth";
 import arc from "./arc-mainnet.json";
+import { arcTransactionUrl, receiptsCsv } from "./receipt-tools";
 
 const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const short = (value: string) => value.length > 22 ? `${value.slice(0, 12)}…${value.slice(-6)}` : value;
@@ -147,7 +148,7 @@ export function mountDashboard(): () => void {
     text("#receipt-count", String(workspace.receipts.length));
     text("#payment-total", `${units(workspace.usage.usdcUnits)} USDC`);
     renderReceipts();
-    $("#usage-rows").innerHTML = workspace.payments.length ? workspace.payments.map((payment) => `<tr><td><code>${escape(short(payment.id))}</code><small>${date(payment.createdAt)}</small></td><td>${health?.paymentMode === "mock" ? "Local test" : "Authorized"}${payment.agentId ? " / agent" : " / direct"}</td><td>${units(payment.amountUnits)} USDC</td><td>${escape(payment.status)}<small title="${escape(payment.settleTx)}">${payment.settleTx ? escape(short(payment.settleTx)) : "No settlement transaction"}</small></td></tr>`).join("") : '<tr><td colspan="4">No payments yet. Your first request will create a payment challenge.</td></tr>';
+    $("#usage-rows").innerHTML = workspace.payments.length ? workspace.payments.map((payment) => `<tr id="payment-${escape(payment.id)}"><td><code>${escape(short(payment.id))}</code><small>${date(payment.createdAt)}</small>${payment.receiptHash ? `<button class="text-link plain-button" data-receipt="${escape(payment.receiptHash)}">View receipt ↗</button>` : ""}</td><td>${health?.paymentMode === "mock" ? "Local test" : "Authorized"}${payment.agentId ? " / agent" : " / direct"}</td><td>${units(payment.amountUnits)} USDC</td><td>${escape(payment.status)}<small title="${escape(payment.settleTx)}">${payment.settleTx ? escape(short(payment.settleTx)) : "No settlement transaction"}</small></td></tr>`).join("") : '<tr><td colspan="4">No payments yet. Your first request will create a payment challenge.</td></tr>';
     $("#load-more-payments").hidden = !workspace.page.paymentsNext;
     $("#agent-cards").innerHTML = workspace.agents.length ? workspace.agents.map((agent) => `<article class="agent-card"><span class="agent-status">PERSISTED / ${escape(short(agent.id))}</span><h3>${escape(agent.name)}</h3><p>Daily spending and allowed models are enforced by the gateway.</p><dl><dt>Daily limit</dt><dd>${"dailyLimitUnits" in agent && typeof agent.dailyLimitUnits === "string" ? units(agent.dailyLimitUnits) + " USDC" : "See mandate policy"}</dd><dt>Spent today</dt><dd>${"spentTodayUnits" in agent && typeof agent.spentTodayUnits === "string" ? units(agent.spentTodayUnits) + " USDC" : "—"}</dd><dt>Policy hash</dt><dd><code>${escape(short(agent.policyHash))}</code></dd></dl><button class="en-button secondary" data-use-agent="${escape(agent.id)}"><span>Use this mandate</span><b>↗</b></button></article>`).join("") : '<p class="workspace-empty">No agents yet. Create a mandate to limit model access and daily spending.</p>';
     const old = select("#inference-agent").value;
@@ -182,6 +183,9 @@ export function mountDashboard(): () => void {
     text("#receipt-notice", `${receipt.status.toUpperCase()} · EIP-712 v${receipt.receiptVersion} · chain ${receipt.chainId ?? "unknown"}. This signature does not independently verify hardware attestation.`);
     const fields = { "Receipt hash": receipt.typedHash, "Model hash": receipt.modelHash, "Code hash": receipt.codeHash, "Input hash": receipt.inHash, "Output hash": receipt.outHash, "Attestation reference": receipt.attRef, "Nonce": receipt.nonce, "Timestamp": receipt.ts, "Signature": receipt.sig, "Verifier": receipt.verifierAddress, "Anchor transaction": receipt.anchoredTx ?? "Pending worker confirmation" };
     $("#receipt-fields").innerHTML = Object.entries(fields).map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`).join("");
+    const explorer = arcTransactionUrl(receipt);
+    const linkedPayments = workspace?.payments.filter(p => p.receiptHash?.toLowerCase() === receipt!.typedHash.toLowerCase()) ?? [];
+    $("#receipt-links").innerHTML = `${explorer ? `<a class="text-link" href="${escape(explorer)}" target="_blank" rel="noopener noreferrer">View on Arc Explorer ↗</a>` : ""}${linkedPayments.map(p => `<button class="text-link plain-button" data-payment="${escape(p.id)}">View payment ${escape(short(p.id))} ↗</button>`).join("")}`;
   }
   function openReceipt(hash: string) {
     receiptVerification++;
@@ -257,6 +261,7 @@ export function mountDashboard(): () => void {
     const tab = event.target.closest<HTMLElement>("[data-view]"); if (tab) navigate(tab.dataset["view"]!);
     const go = event.target.closest<HTMLElement>("[data-goto]"); if (go) navigate(go.dataset["goto"]!);
     const chosen = event.target.closest<HTMLElement>("[data-receipt]"); if (chosen) openReceipt(chosen.dataset["receipt"]!);
+    const payment = event.target.closest<HTMLElement>("[data-payment]"); if (payment) { dialog("#receipt-dialog").close(); navigate("payments"); document.getElementById(`payment-${payment.dataset["payment"]}`)?.scrollIntoView({ block: "center" }); }
     const agent = event.target.closest<HTMLElement>("[data-use-agent]"); if (agent) { select("#execution-mode").value = "agent"; $("#agent-choice").hidden = false; select("#inference-agent").value = agent.dataset["useAgent"]!; navigate("inference"); input("#prompt").focus(); }
     if (event.target.closest("[data-refresh]")) void refresh();
     const example = event.target.closest<HTMLElement>("[data-prompt]"); if (example && !busy && !recovery) { input("#prompt").value = example.dataset["prompt"]!; input("#prompt").dispatchEvent(new Event("input")); input("#prompt").focus(); }
@@ -393,6 +398,7 @@ export function mountDashboard(): () => void {
   on("#receipt-dialog", "close", () => { receiptVerification++; });
   on("#download-receipt", "click", () => { if (receipt) download(`enclave-receipt-${receipt.typedHash.slice(2, 14)}.json`, receipt); });
   on("#export-receipts", "click", () => { if (workspace) download("enclave-receipts.json", { chainId: health?.chainId, exportedAt: new Date().toISOString(), complete: !workspace.page.receiptsNext, receipts: workspace.receipts }); });
+  on("#export-receipts-csv", "click", () => { if (workspace) { download("enclave-receipts.csv", receiptsCsv(workspace.receipts), "text/csv"); if (workspace.page.receiptsNext) notify("CSV contains loaded receipts only. Load older receipts to include them."); } });
   on("#export-usage", "click", () => {
     if (!workspace) return;
     const csv = "payment,created,amount_usdc,status,settlement_tx\n" + workspace.payments.map((p) => [p.id, p.createdAt, units(p.amountUnits), p.status, p.settleTx ?? ""].map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\n");

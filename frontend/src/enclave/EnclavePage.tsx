@@ -4,6 +4,7 @@ import homeStyles from "./home-reference.css?raw";
 import "./dashboard.css";
 import { VerifyReceiptPage } from "./VerifyReceiptPage";
 import { DeploymentStatusPage } from "./DeploymentStatusPage";
+import { ModelRegistryPage } from "./ModelRegistryPage";
 import { WalletConnectControl } from "./WalletConnectControl";
 
 const pages = import.meta.glob("./pages/*.html", {
@@ -55,7 +56,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
   const markup = pages[`./pages/${meta.file}`] ?? "";
 
   useEffect(() => {
-    if (path === "/verify/" || path === "/status/") return;
+    if (path === "/verify/" || path === "/status/" || path === "/models/") return;
     let cancelled = false;
     let disposeDashboard: (() => void) | undefined;
     void (async () => {
@@ -83,6 +84,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
 
   if (path === "/verify/") return <VerifyReceiptPage />;
   if (path === "/status/") return <DeploymentStatusPage />;
+  if (path === "/models/") return <ModelRegistryPage />;
   return (
     <>
       {path === "/" ? <style dangerouslySetInnerHTML={{ __html: homeStyles }} /> : null}

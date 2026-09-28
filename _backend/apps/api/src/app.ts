@@ -236,6 +236,8 @@ export function createApp(gateway: EnclaveGateway, log: Logger, agentRuntime?: A
   });
 
   app.get("/v1/models", async (c) => c.json(await gateway.listModels()));
+  app.get("/v1/public/models", async (c) => { c.header("Cache-Control", "public, max-age=30"); return c.json(await gateway.publicModelRegistry()); });
+  app.get("/v1/public/arc-receipts/count", async (c) => { c.header("Cache-Control", "public, max-age=30"); return c.json(await gateway.arcReceiptCount()); });
 
   app.get("/v1/solvency/:asset", async (c) => {
     return c.json(await gateway.solvency(c.req.param("asset")));

@@ -542,6 +542,21 @@ export class EnclaveGateway {
     return this.db.select().from(models).where(and(eq(models.approved, true), eq(models.revoked, false)));
   }
 
+  async publicModelRegistry() {
+    return this.db.select({ modelHash: models.modelHash, codeHash: models.codeHash,
+      version: models.version, approved: models.approved, revoked: models.revoked,
+      listingId: models.listingId, createdAt: models.createdAt })
+      .from(models).orderBy(desc(models.createdAt));
+  }
+
+  async arcReceiptCount() {
+    const [row] = await this.db.select({ total: sql<number>`count(*)::int` }).from(receipts)
+      .where(and(eq(receipts.chainId, 5042), eq(receipts.status, "anchored"),
+        sql`lower(${receipts.verifierAddress}) = lower(${this.config.ATTESTATION_VERIFIER_ADDRESS})`,
+        sql`${receipts.anchoredTx} ~ '^0x[0-9a-fA-F]{64}$'`));
+    return { chainId: 5042, verifierAddress: this.config.ATTESTATION_VERIFIER_ADDRESS, confirmed: row?.total ?? 0 };
+  }
+
   async solvency(asset: string) {
     const listed = await this.listModels();
     return {

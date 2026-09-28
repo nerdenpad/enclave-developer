@@ -11,7 +11,7 @@ const receipt = { receiptVersion: 2, nonce: sha256Hex("invocation"), modelHash: 
 const encryptedOutput = { iv: "output-iv", tag: "output-tag", ciphertext: "encrypted-result" };
 const quote = { cpuQuote: "cpu", gpuQuote: "gpu", measurement: hash, tcbVersion: 1, timestamp: Date.now(), signature: "0xab" };
 const inferBody = { sessionId: uuid, iv: "a", tag: "b", ciphertext: "c" };
-const methods = ["sessionWrapKeyForOwner", "activateTcbPolicy", "health", "quote", "openSession", "sessionWrapKey", "infer", "settlePayment", "paymentAuthorization", "listChainEvents", "exportWithViewKey", "getPublicReceipt", "getPublicPayment", "agentSdkTools", "invokeAgentTool", "listModels", "solvency", "createAgent", "listAgents", "getAgent", "putAgentMemory", "stakeEncl", "unstakeEncl", "stakeStatus", "feeSplitPreview", "distributeFees", "listBuybacks", "listTcbPolicies", "rotateTcbPolicy", "listMarketplace", "listModel", "approveListing", "bootstrapApproveListing", "listingApprovalStatus", "revokeListing", "issueViewKey", "stakingRewards", "claimStakingRewards", "buybackStatus", "configureBuyback", "setBuybackReserve", "executeBuyback"] as const;
+const methods = ["sessionWrapKeyForOwner", "activateTcbPolicy", "health", "quote", "openSession", "sessionWrapKey", "infer", "settlePayment", "paymentAuthorization", "listChainEvents", "exportWithViewKey", "getPublicReceipt", "getPublicPayment", "agentSdkTools", "invokeAgentTool", "listModels", "publicModelRegistry", "arcReceiptCount", "solvency", "createAgent", "listAgents", "getAgent", "putAgentMemory", "stakeEncl", "unstakeEncl", "stakeStatus", "feeSplitPreview", "distributeFees", "listBuybacks", "listTcbPolicies", "rotateTcbPolicy", "listMarketplace", "listModel", "approveListing", "bootstrapApproveListing", "listingApprovalStatus", "revokeListing", "issueViewKey", "stakingRewards", "claimStakingRewards", "buybackStatus", "configureBuyback", "setBuybackReserve", "executeBuyback"] as const;
 let gateway: Record<typeof methods[number], ReturnType<typeof vi.fn>>;
 let app: ReturnType<typeof createApp>;
 function post(path: string, body: unknown, headers = {}) { return app.request(path, { method: "POST", headers: { "content-type": "application/json", "x-api-key": "owner", ...headers }, body: JSON.stringify(body) }); }
@@ -29,6 +29,13 @@ beforeEach(() => {
 });
 
 describe("HTTP contracts", () => {
+  it("exposes public model status and confirmed Arc receipt count", async () => {
+    const registry = [{ modelHash: hash, codeHash: hash, approved: false, revoked: true }];
+    gateway.publicModelRegistry.mockResolvedValue(registry);
+    gateway.arcReceiptCount.mockResolvedValue({ chainId: 5042, confirmed: 2 });
+    expect(await (await app.request("/v1/public/models")).json()).toEqual(registry);
+    expect(await (await app.request("/v1/public/arc-receipts/count")).json()).toEqual({ chainId: 5042, confirmed: 2 });
+  });
   it("mounts the optional runtime using the caller identity", async () => {
     const runtime = { list: vi.fn().mockResolvedValue([{ id: uuid, status: "queued" }]) };
     const withJobs = createApp(gateway as unknown as EnclaveGateway, createLogger("silent"), runtime as unknown as AgentRuntime);

@@ -1,19 +1,24 @@
 import { useEffect, useState } from "react";
-import { EnclaveClient, type Health, type Policies } from "./api";
+import { EnclaveClient, type Health, type Policies, type ArcReceiptCount } from "./api";
 import { VerificationHeader } from "./VerifyReceiptPage";
+import { releaseUpdates } from "./release-updates";
 
 export function DeploymentStatusPage() {
   const [snapshot, setSnapshot] = useState<{ health: Health; policies: Policies; at: string } | null>(null);
   const [error, setError] = useState(""); const [refresh, setRefresh] = useState(0);
+  const [receiptCount, setReceiptCount] = useState<ArcReceiptCount | null>(null);
   useEffect(() => {
     const client = new EnclaveClient({ timeoutMs: 10_000 }); let active = true;
     setSnapshot(null); setError("");
+    setReceiptCount(null);
     void Promise.all([client.health(), client.policies()]).then(([health, policies]) => {
       if (!active) return;
       if (health.servingModel.codeHash.toLowerCase() !== policies.active.measurement.toLowerCase() || policies.active.status !== "active") throw new Error("The gateway reports inconsistent model and policy state. Refresh after the operator resolves it.");
       setSnapshot({ health, policies, at: new Date().toISOString() });
     }).catch(() => { if (active) setError("Deployment details are unavailable or inconsistent. No live or production status has been established."); });
-    return () => { active = false; client.disconnect(); };
+    const readCount = () => { void client.arcReceiptCount().then(count => { if (active) setReceiptCount(count); }).catch(() => { if (active) setReceiptCount(null); }); };
+    readCount(); const timer = setInterval(readCount, 30_000);
+    return () => { active = false; clearInterval(timer); client.disconnect(); };
   }, [refresh]);
   const health = snapshot?.health, policy = snapshot?.policies.active;
   const fields = health && policy ? {
@@ -42,5 +47,11 @@ export function DeploymentStatusPage() {
       <li>The browser workspace does not submit real-network wallet authorizations or launch autonomous agent jobs.</li>
       <li>A receipt signature does not by itself prove hardware attestation, payment, anchoring or the contents of a prompt and response.</li>
     </ul><a className="text-link" href="/verify">Verify a downloaded receipt ↗</a></section></div>
+    <section className="panel" aria-label="Arc receipt count"><h2>Confirmed Arc receipts</h2>
+      <p>{receiptCount ? `${receiptCount.confirmed} receipts confirmed on Arc (chain ${receiptCount.chainId})` : "Count unavailable"}</p>
+      <p className="field-note">Counted from receipts whose Arc anchor transaction was confirmed by the gateway worker. It does not include pending or local simulation records.</p></section>
+    <section className="panel" aria-label="Update history"><h2>Update history</h2><p>Selected repository changes. This is not a service uptime log.</p>
+      <ol className="deployment-limits">{releaseUpdates.map(update => <li key={update.revision}><time dateTime={update.date}>{update.date}</time> · <strong>{update.title}</strong> — {update.detail} <code>{update.revision}</code></li>)}</ol>
+      <a className="text-link" href="/models">Browse the public model registry ↗</a></section>
   </main></>;
 }
