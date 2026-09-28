@@ -20,20 +20,14 @@ A completed Enclave request carries a signed receipt. It binds the model, the co
 input, the output and an attestation reference. You export it, check the signature in the
 browser, and read whether the configured contracts accepted and anchored it.
 
-Underneath, the hosted gateway still runs in software on an ordinary VPS. NEAR is the
-selected remote GPU. **The receipt says what was signed, and the status page says what
-that signature does not prove** — hardware custody, payment and a completed hosted
-inference are separate claims.
+NEAR is the selected GPU inference provider. **The receipt says what was signed,
+and the status page reports the deployed network and completed evidence.** Payment
+and provider verification are separate checks.
 
-### Production host
+### Release status
 
-On 26 September 2026 the customer accepted the software gateway as the production host
-and **cancelled the confidential-VM requirement**. Keys stay in software on the VPS.
-That decision does not settle USDC and does not complete a hosted inference.
-
-Hosted inference is waiting on NVIDIA: their attestation service returns HTTP 403 to
-the VPS, and strict verification stays on. Arc contracts are live and the API uses
-authorized settlement; public browser checkout stays off until that inference path works.
+Arc contracts are deployed and the API supports authorized settlement. Public browser
+checkout remains disabled pending an accepted hosted inference and payment journey.
 
 What is live and what is still open is published in the
 [roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).
@@ -46,13 +40,12 @@ evidence does not fall through to an unverified provider. The request ends.
 **A signature is not a hardware proof.** A valid receipt shows that the configured signer
 signed those hashes. It does not, by itself, prove the signer ran in a TEE.
 
-**The status page does not invent a deployment.** Software key custody is named as
-software. Where hosted inference has not completed, the page says so instead of implying
-a finished confidential deployment.
+**The status page reports the deployed path.** It distinguishes the network, payment
+mode, model and completed evidence.
 
 ### Repositories
 
 **[enclave-developer](https://github.com/nerdenpad/enclave-developer)** — the frontend,
 the backend and the contracts, together on `main`.
 
-<sub>Software gateway, accepted as the production host. Confidential VM is not required. Arc settlement is configured; public checkout stays off while hosted inference waits on NVIDIA.</sub>
+<sub>Arc settlement is configured. Public checkout remains gated by end-to-end acceptance.</sub>

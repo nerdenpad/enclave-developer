@@ -2,7 +2,7 @@
 
 The API includes an executable, bounded reasoning loop backed by PostgreSQL. It uses the existing Enclave gateway for quote verification, sessions, encrypted inference and payment settlement. The model returns only `{"action":"continue"|"complete","output":"..."}`; it cannot invoke arbitrary tools, shell commands, browser actions or wallet operations. A tick executes at most one inference step.
 
-This is a **software host runtime**, not an enclave-owned hardware agent or an attested wallet. NEAR protects the selected remote inference environment. The local gateway, process memory and stored CVM wrapping key retain the deployment trust described in the main README. A NEAR inference API key does not itself provision a confidential VM for this process.
+The runtime uses the existing gateway session and key policies. Remote NEAR inference evidence and gateway execution are evaluated as separate trust boundaries. A NEAR inference API key alone does not establish either boundary.
 
 ## Enablement and limits
 

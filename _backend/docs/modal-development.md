@@ -1,6 +1,6 @@
 # Enclave: разработка на Modal
 
-Modal сохранён как профиль обычного GPU-инференса. Текущий провайдер GPU TEE — NEAR, для него реализован отдельный [проверяемый профиль](near-development.md). Локальный шлюз по-прежнему использует `TEE_MODE=dev`, поэтому запрет production сохраняется.
+Modal сохранён как профиль обычного GPU-инференса. Текущий провайдер GPU TEE — NEAR, для него реализован отдельный [проверяемый профиль](near-development.md). Для профиля разработки выпуск production остаётся закрытым до приёмки.
 
 ## Что запускается
 
@@ -103,6 +103,6 @@ npm run test:modal
 
 ## Текущий GPU TEE-профиль: NEAR
 
-Для NEAR используется `INFERENCE_BACKEND=near-verified`: проверяются CPU/GPU evidence, фактический TLS-ключ и подпись запроса/ответа. Этот профиль уже реализован и проверен живым запросом. Аппаратная изоляция самого шлюза Enclave, его ключей и агентного runtime остаётся отдельной задачей; подключение удалённой модели не помещает локальный `DevCvm` в TEE. Конкретный провайдер для этой изоляции не закреплён, обязательного перехода на Phala нет.
+Для NEAR используется `INFERENCE_BACKEND=near-verified`: проверяются CPU/GPU evidence, фактический TLS-ключ и подпись запроса/ответа. Этот профиль уже реализован и проверен живым запросом. Верификация удалённой модели и требования к выпуску шлюза проверяются независимо. Обязательного перехода на Phala нет.
 
 Источники: [Modal Secrets](https://modal.com/docs/guide/secrets), [CLI tokens](https://modal.com/docs/cli/latest/token), [web servers](https://modal.com/docs/reference/modal.web_server), [HTTP timeouts](https://modal.com/docs/guide/webhook-timeouts), [vLLM security](https://docs.vllm.ai/en/stable/usage/security/), [vLLM 0.29.0](https://github.com/vllm-project/vllm/releases/tag/v0.29.0), [лицензия модели](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct/blob/aa8e72537993ba99e69dfaafa59ed015b17504d1/LICENSE).

@@ -2,7 +2,7 @@
 
 ENCLAVE provides a Hono/tRPC gateway, PostgreSQL state, BullMQ workers and Solidity contracts for encrypted inference requests, signed receipts, USDC payments, sealed agents, model listings and token economics. The connected dashboard is included in the sibling `frontend` directory. See the [combined repository README](../README.md) for one-command startup or [local frontend integration](docs/frontend-integration.md) for detailed backend and browser setup.
 
-The gateway uses a **software CVM** with local session-attestation fixtures. Inference supports synthetic/local backends, an authenticated Modal development endpoint, and a `near-verified` backend with actual Intel TDX and NVIDIA GPU evidence verification, attested TLS binding and provider signatures. NEAR verifies the remote model deployment; it does not isolate this gateway, its receipt signer or agent keys from the local host. The API rejects `NODE_ENV=production` until that boundary is moved into a hardware TEE. Real Arc confidential transfers remain unavailable.
+Inference supports local development fixtures, an authenticated Modal development endpoint, and a `near-verified` backend with Intel TDX and NVIDIA GPU evidence verification, attested TLS binding and provider signatures. The API rejects `NODE_ENV=production` pending its release gate. Real Arc confidential transfers remain unavailable.
 
 ## Layout
 
@@ -75,22 +75,22 @@ Responses additionally contain `providerEvidence`: an EIP-712 sidecar associates
 
 ### Durable agent jobs
 
-The opt-in [agent runtime](docs/agent-runtime.md) executes bounded reasoning steps through the gateway. Goals, credentials and state are encrypted; PostgreSQL leases coordinate runners, and an authenticated action journal links each step to its receipt and payment. Authorized mode waits for an external payment signature. Uncertain external outcomes require reconciliation before another step. `AGENT_RUNTIME_ENABLED=false` is the default. This is a software-host runtime with no arbitrary shell or browser tools and no hardware-held wallet.
+The opt-in [agent runtime](docs/agent-runtime.md) executes bounded reasoning steps through the gateway. Goals, credentials and state are encrypted; PostgreSQL leases coordinate runners, and an authenticated action journal links each step to its receipt and payment. Authorized mode waits for an external payment signature. Uncertain external outcomes require reconciliation before another step. `AGENT_RUNTIME_ENABLED=false` is the default. The runtime exposes no arbitrary shell or browser tools, and payment signing remains external.
 
 Tool registration does not create a sealed autonomous runtime or wallet. Receipt and hardware proof verification remain independent of the adapter's response-format validation.
 
 ## Request and receipt flow
 
-1. Fetch `GET /v1/attestation/quote`, then submit the quote to `POST /v1/session` with an API key. The software CVM validates the configured vendor signature, image measurement and CPU/GPU policy flags before releasing its software-held key. The response contains a session ID and base64 `wrapKey`.
+1. Fetch `GET /v1/attestation/quote`, then submit the quote to `POST /v1/session` with an API key. The development gateway validates the configured signature, image measurement and CPU/GPU policy flags before releasing a session key. The response contains a session ID and base64 `wrapKey`.
 2. Encrypt the request using the session key and AES-GCM. `POST /v1/inference` accepts `sessionId`, `iv`, `tag`, `ciphertext` and an optional `agentId`. Without payment it returns HTTP 402 with `details.accepts[0].extra.paymentId`.
 3. Settle the payment, then repeat the same request with `x-payment: <paymentId>` or the `paymentId` body field. Use an `Idempotency-Key` to recover the same completed response.
 4. The response contains a signed receipt, its EIP-712 typed hash, an output hash and an AES-GCM `output` blob. Decrypt output with the session key and verify its hash against the receipt.
 
 Payment intents bind the API-key owner, request, agent and model listing. A payment cannot be consumed for a different request. Idempotency keys are scoped to the caller and request; concurrent reuse is serialized in PostgreSQL. Agent memory is stored and returned as sealed ciphertext. Public receipt endpoints expose the hash projection; auditor fields require a valid view-key. Prompt/output plaintext and key material are redacted from application logs.
 
-New receipts use **EIP-712 version 2** with a random `bytes32 nonce`, so identical calls in the same second have distinct hashes. The receipt's `attRef` identifies the caller's verified session quote. The database persists receipt version, nonce, chain ID, verifier address, signature and encrypted output. The worker checks the persisted domain before anchoring. Existing version-1 receipts have an explicit legacy verification path; new inference does not generate version 1. Sessions retain their signed quote so the software CVM can revalidate admission after a process restart.
+New receipts use **EIP-712 version 2** with a random `bytes32 nonce`, so identical calls in the same second have distinct hashes. The receipt's `attRef` identifies the caller's verified session quote. The database persists receipt version, nonce, chain ID, verifier address, signature and encrypted output. The worker checks the persisted domain before anchoring. Existing version-1 receipts have an explicit legacy verification path; new inference does not generate version 1. Sessions retain their signed quote so the gateway can revalidate admission after a process restart.
 
-The attestation and model keys live in an ordinary process and local persistence in this implementation. AES-GCM protects transport/storage blobs but does not isolate plaintext from the host administrator or local inference process.
+AES-GCM protects transport and storage blobs. Evaluate execution isolation and key custody separately before making a hardware security claim.
 
 ## USDC payments and agent mandates
 
@@ -169,7 +169,7 @@ Authenticated routes use `x-api-key`; auditor export uses `x-view-key`. Administ
 
 | Method | Path | Behavior |
 | --- | --- | --- |
-| GET | `/health` | Liveness, software TEE mode and chain ID |
+| GET | `/health` | Liveness, deployment mode and chain ID |
 | GET | `/v1/attestation/quote` | Software vendor-signed quote |
 | POST | `/v1/session` | Verify quote and create a session/wrapping key |
 | POST | `/v1/inference` | Encrypted request; 402 challenge or receipt plus encrypted output |
@@ -208,7 +208,7 @@ Authenticated routes use `x-api-key`; auditor export uses `x-view-key`. Administ
 | GET | `/v1/tcb/policies` | Active software policy and history |
 | POST | `/v1/tcb/rotate` | Propose an immutable pending software policy |
 | POST | `/v1/tcb/:version/activate` | Activate an admitted policy with expected active version |
-| GET | `/v1/solvency/:asset` | Software CVM status |
+| GET | `/v1/solvency/:asset` | Solvency status |
 | GET | `/v1/chain/events` | Stored indexed contract events |
 | POST | `/v1/compliance/view-keys` | Issue an auditor secret once |
 | GET | `/v1/compliance/export` | Auditor export authenticated by view-key |
@@ -237,10 +237,10 @@ The Python verifier and Modal helper suites run separately with `npm run test:ne
 
 ## Remaining integration limits
 
-- Intel TDX/NVIDIA cryptographic verification and TLS-bound remote NEAR inference are implemented. NEAR is the selected GPU inference provider. Hardware isolation of Enclave's own gateway and agent runtime, immutable measured workload/weights, hardware-only key release, and the PDF's comparable hardware overhead benchmark remain separate requirements. These requirements do not mandate a switch to Phala. See the NEAR guide for the current integration's explicit trust limits.
+- Intel TDX/NVIDIA cryptographic verification and TLS-bound remote NEAR inference are implemented. NEAR is the selected GPU inference provider. Immutable measured workload/weights, deployment key-release evidence, and the PDF's comparable hardware overhead benchmark remain separate acceptance requirements. See the NEAR guide for the current integration's explicit trust limits.
 - `confidential=true` is supported only in local mock payment mode. MockConfidentialTransfer exercises a hook without moving USDC or proving a shielded amount; it cannot support confidential agent mandates. Nonlocal/authorized confidential requests fail closed. There is no implemented Arc shielded-transfer privacy or explorer/view-key integration.
 - Authorized public payments and router buybacks have real contract paths and local tests, but live USDC/Arc/DEX deployment configuration and interoperability remain external integration work.
 - On-chain receipts attest the configured signer's assertion and approved model/code pair. The full hardware quote and TCB/vendor policy are not independently verified by the Solidity registry.
 - Durable agent jobs provide bounded reasoning, encrypted state and recovery. They do not implement arbitrary external tools, a separately isolated agent wallet or a collateralized credit lane; authorized payments use an external payer and its on-chain mandate.
 - Public chain payments expose public token transfers. Application auditor view-keys restrict API exports; they do not hide public blockchain data.
-- The current software stack, local admin provisioning, full-history journal scans and in-process inference/database transaction duration have not been qualified for production throughput or availability.
+- Local admin provisioning, full-history journal scans and in-process inference/database transaction duration have not been qualified for production throughput or availability.

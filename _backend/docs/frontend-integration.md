@@ -1,6 +1,6 @@
 # Local frontend integration
 
-The demo runs the real API, PostgreSQL persistence, payment contracts, receipt queue and worker against local Anvil. Its default inference provider is **echo**. Echo returns a deterministic local response; it is not a hosted language model or a hardware TEE. The gateway always remains a development software CVM. Selecting `near-verified` verifies the remote provider's evidence and can incur real NEAR inference charges when a user submits a paid inference; it does not make the gateway a hardware enclave.
+The demo runs the real API, PostgreSQL persistence, payment contracts, receipt queue and worker against local Anvil. Its default inference provider is **echo**. Echo returns a deterministic local response; it is not a hosted language model or a hardware TEE. Selecting `near-verified` verifies the remote provider's evidence and can incur real NEAR inference charges when a user submits a paid inference. The local demo remains a development test.
 
 ## Prepare the backend
 

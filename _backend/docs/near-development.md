@@ -1,6 +1,6 @@
 # NEAR GPU development
 
-NEAR is the selected GPU TEE inference provider. This profile verifies a managed NEAR model before sending it a prompt. The Enclave gateway, session key handling, agent memory and receipt signer still execute in a local software CVM. `NODE_ENV=production` remains rejected. Hardware acceptance of the remote model is not acceptance of the whole Enclave TEE design. Completing the remaining gateway and agent isolation requirements does not mandate a switch to Phala.
+NEAR is the selected GPU TEE inference provider. This profile verifies a managed NEAR model before sending it a prompt. `NODE_ENV=production` remains gated. The provider proof covers remote execution; gateway release requirements are tracked separately. NEAR remains the selected provider.
 
 See [the CVM deployment requirements and current account status](near-cvm-deployment.md) for the access needed to host our own gateway at NEAR. The inference key alone does not provide that deployment access.
 
@@ -54,8 +54,8 @@ For the normal gateway, migrate the database and register/approve the exact serv
 
 The measured base VM includes a privileged deployment manager and launcher. Its signed action history does not independently measure the currently executing manager binary or authenticate all runtime overrides. The development policy explicitly trusts NEAR's measured guest/control plane and pins its reported deployment. It is not a proof of immutable runtime updates or byte-for-byte weights. GPU association also depends on that measured in-VM attestation code.
 
-The standard `modelHash` remains a hash of the model identifier, and the local `codeHash` describes the software serving policy. The NEAR hardware reference is a separate field, not a silent upgrade of those claims. Moving the gateway/agent wallet into an independently controlled measured TEE and implementing a stronger on-chain hardware-policy admission path remain necessary for the full specification.
+The standard `modelHash` remains a hash of the model identifier, and the local `codeHash` describes the serving policy. The NEAR hardware reference is a separate field. Full hardware-policy admission requires separate acceptance.
 
-Unknown hardware, unavailable collateral/NRAS, an expired policy or a failed signature returns an error. There is no fallback to unverified NEAR, Modal or synthetic output. Do not relax these checks to improve availability.
+Unknown hardware, unavailable verification collateral, an expired policy or a failed signature returns an error. There is no fallback to unverified NEAR, Modal or synthetic output. Do not relax these checks to improve availability.
 
 Official references: [NEAR TLS verification](https://docs.near.ai/cloud/verification/tls), [model verification](https://docs.near.ai/cloud/verification/model), and [chat signatures](https://docs.near.ai/cloud/verification/chat).

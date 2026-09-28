@@ -1,10 +1,9 @@
 # Single-server pilot
 
 This deployment runs the built website, API, receipt worker, PostgreSQL, Redis
-and an isolated development chain on one Debian 12 x86-64 VPS. NEAR remains the
-remote inference provider. The VPS is not a confidential VM. Gateway keys are
-held in software; settlement uses MockUSDC on Anvil 31337. This is not an E1
-production release.
+and an isolated development chain on one Debian 12 host. NEAR remains the
+remote inference provider. Development settlement uses MockUSDC on Anvil 31337.
+This deployment alone is not E1 acceptance.
 
 The initial host has 8 vCPUs, 16 GB RAM and a 222 GB root filesystem. There are
 no GPUs on this host. A single host is not highly available.
@@ -97,6 +96,5 @@ Renewal checks must not disable TLS validation.
   must reject requests; do not extend trust automatically or disable checks.
 - Domain changes require DNS A records to the VPS and a new certificate/nginx
   configuration. They do not require moving application data.
-- Moving to Phala requires a hardware adapter and attestation-bound key
-  release, an explicit signer transition, and acceptance of the deployed path.
-  A larger GPU or a new hostname does not establish those guarantees.
+- Any future infrastructure migration requires an explicit signer transition,
+  approved key-release policy and acceptance of the deployed path.
