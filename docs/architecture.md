@@ -29,7 +29,7 @@ flowchart LR
 
 ## Trust boundaries
 
-**Browser to gateway.** Request encryption terminates at the gateway. Evaluate gateway key protection separately from transport encryption and remote model verification.
+**Browser to gateway.** Request encryption terminates at the application gateway. NEAR evidence describes the remote model execution path, not this application process.
 
 **Gateway to provider.** The NEAR adapter verifies remote CPU/GPU evidence and the provider connection against an operator-reviewed policy. This evidence describes the remote model deployment. Unavailable verification or rejected evidence stops the request; it does not select an unverified fallback.
 
@@ -39,4 +39,4 @@ flowchart LR
 
 ## Production requirements
 
-Any hardware-backed production claim requires measurement-bound key release and tested recovery evidence. Production also requires the selected public network, real USDC, user authentication and acceptance on the deployed path. See [E1 acceptance](e1-release.md).
+Production requires a supported NEAR verification path, the selected public network, real USDC, user authentication and acceptance on the deployed path. Hardware claims must be limited to the NEAR evidence actually verified for each request. See [E1 acceptance](e1-release.md).

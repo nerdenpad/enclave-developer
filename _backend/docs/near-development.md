@@ -2,7 +2,7 @@
 
 NEAR is the selected GPU TEE inference provider. This profile verifies a managed NEAR model before sending it a prompt. `NODE_ENV=production` remains gated. The provider proof covers remote execution; gateway release requirements are tracked separately. NEAR remains the selected provider.
 
-See [the CVM deployment requirements and current account status](near-cvm-deployment.md) for the access needed to host our own gateway at NEAR. The inference key alone does not provide that deployment access.
+See [the NEAR Gateway deployment path](near-gateway-deployment.md) for the remaining release work. The inference key is used only for provider requests.
 
 ## Setup
 

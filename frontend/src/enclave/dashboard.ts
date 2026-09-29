@@ -104,27 +104,27 @@ export function mountDashboard(): () => void {
     const local = canSettleLocally(health);
     const label = near ? "NEAR GPU · DEVELOPMENT GATEWAY" : echo ? "LOCAL ECHO · DEVELOPMENT" : "MODEL ENDPOINT · DEVELOPMENT GATEWAY";
     text("#environment-badge", label);
-    text("#environment-description", near ? "NEAR adapter configured; each request requires hardware verification. Gateway keys run in software." : echo ? "Real gateway, database and receipt signatures. The echo provider is a development fixture." : "Model inference through an OpenAI-compatible endpoint. The gateway and its keys run in software; this adapter does not verify provider hardware.");
+    text("#environment-description", near ? "NEAR adapter configured; each request requires remote hardware verification. Requests are processed by the application gateway." : echo ? "Real gateway, database and receipt signatures. The echo provider is a development fixture." : "Model inference through an OpenAI-compatible endpoint. This adapter does not verify provider hardware.");
     text("#connection-status", `Connected · ${client!.baseUrl}`);
     $("#connection-status").dataset["connected"] = "true";
     text("#connection-note", `Chain ${health.chainId} · ${health.paymentMode} payments · gateway ${health.teeMode}`);
     text("#request-environment", near ? "NEAR GPU" : health.inferenceBackend.toUpperCase());
     select("#model-select").innerHTML = `<option value="${escape(health.servingModel.modelHash)}">${escape(health.servingModel.name)}</option>`;
     text("#request-note", `Serving ${health.servingModel.name}. Price: ${health.inferencePriceUsdc.toFixed(6)} ${local ? "test " : ""}USDC per call. ${near ? "Remote CPU/GPU evidence is checked by the gateway." : echo ? "Echo is a test provider, not an LLM." : "The configured model endpoint serves the request without hardware verification by this adapter."}`);
-    text("#session-trust-note", health.teeMode === "dev" ? "Development software policy · no hardware gateway" : "Gateway-reported attestation policy");
+    text("#session-trust-note", health.teeMode === "dev" ? "Development application policy" : "Application policy");
     text("#provider-trust-note", near ? "NEAR evidence verified by the gateway" : echo ? "Local echo development fixture" : "OpenAI-compatible model endpoint · hardware not verified");
     text("#payment-network", local ? "Local EVM · 31337" : `EVM chain ${health.chainId}`);
     text("#payment-description", local ? `Local-chain payment uses test USDC.${echo ? " The echo provider is a local fixture." : " Remote provider usage can still be billed."}` : "A wallet authorization is required. This interface does not submit real-network payments.");
     text("#registry-status", "BACKEND REGISTRY");
     text("#metric-environment", near ? "NEAR GPU / dev gateway" : echo ? "Local echo development" : "Model endpoint / dev gateway");
-    text("#topology-status", near ? "NEAR GPU + SOFTWARE GATEWAY" : echo ? "LOCAL DEVELOPMENT" : "MODEL ENDPOINT + SOFTWARE GATEWAY");
+    text("#topology-status", near ? "NEAR GPU + APP GATEWAY" : echo ? "LOCAL DEVELOPMENT" : "MODEL ENDPOINT + APP GATEWAY");
     text("#topology-provider", near ? "NEAR GPU provider" : echo ? "Local echo provider" : "OpenAI-compatible model provider");
-    text("#topology-boundary", "Software gateway · explicit trust boundary");
+    text("#topology-boundary", "Application gateway · request decryption boundary");
     text("#topology-chain", `CHAIN ${health.chainId} · ${local ? "TEST USDC" : "USDC"} · x402`);
     text("#agent-model-note", `Allowed model: ${health.servingModel.name}. The gateway enforces the daily limit before execution.`);
     if (policies) {
       text("#topology-policy", `POLICY / V${policies.active.version}`);
-      const fields = { "Policy version": policies.active.version, "Policy status": policies.active.status, "Serving image": policies.active.servingImageId, "Gateway custody": "Development software", "Inference provider": health.inferenceBackend, "Receipt signer": health.receiptSigner, "Contract": health.verifierAddress };
+      const fields = { "Policy version": policies.active.version, "Policy status": policies.active.status, "Serving image": policies.active.servingImageId, "Request boundary": "Application gateway", "Inference provider": health.inferenceBackend, "Receipt signer": health.receiptSigner, "Contract": health.verifierAddress };
       $("#policy-details").innerHTML = Object.entries(fields).map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`).join("");
     }
     $("#model-cards").innerHTML = models.length ? models.map((model) => {
@@ -414,7 +414,7 @@ export function mountDashboard(): () => void {
     event.preventDefault(); if (!workspace) return;
     const scope = select("#audit-scope").value; const includeAmounts = input("#include-amounts").checked;
     const paymentRecords = workspace.payments.map(({ amountUnits, ...rest }) => ({ ...rest, ...(includeAmounts ? { amountUnits } : {}) }));
-    download("enclave-audit.json", { exportedAt: new Date().toISOString(), purpose: input("#audit-purpose").value.trim(), scope, chainId: health?.chainId, gatewayMode: health?.teeMode, note: "Loaded owner records only. No prompt, response, session key or API key is included. Signature evidence does not establish hardware custody of the gateway.", ...(scope !== "payments" ? { receipts: workspace.receipts, moreReceiptsAvailable: Boolean(workspace.page.receiptsNext) } : {}), ...(scope !== "receipts" ? { payments: paymentRecords, morePaymentsAvailable: Boolean(workspace.page.paymentsNext) } : {}) });
+    download("enclave-audit.json", { exportedAt: new Date().toISOString(), purpose: input("#audit-purpose").value.trim(), scope, chainId: health?.chainId, gatewayMode: health?.teeMode, note: "Loaded owner records only. No prompt, response, session key or API key is included. Receipt signatures and NEAR provider evidence are verified separately.", ...(scope !== "payments" ? { receipts: workspace.receipts, moreReceiptsAvailable: Boolean(workspace.page.receiptsNext) } : {}), ...(scope !== "receipts" ? { payments: paymentRecords, morePaymentsAvailable: Boolean(workspace.page.paymentsNext) } : {}) });
     notify("Audit export downloaded.");
   });
   on("#issue-view-key", "click", () => { text("#view-key-error", ""); input("#view-key-secret").value = ""; $("#view-key-result").hidden = true; $("#view-key-form").hidden = false; dialog("#view-key-dialog").showModal(); });

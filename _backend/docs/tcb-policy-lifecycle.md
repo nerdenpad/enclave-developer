@@ -28,4 +28,4 @@ Sessions must retain their signed quote for admission to be revalidated. Older s
 
 Existing listings keep their ABI and legacy model/code approval behavior. They have no policy binding and cannot be upgraded in place because model/code pairs are unique. Register a new pair through `listWithPolicy` for the new version. Receipt v2 remains compatible: the Solidity verifier does not independently validate CPU/GPU vendor evidence.
 
-The [NEAR CVM deployment requirements](near-cvm-deployment.md) describe the separate hardware work still needed.
+The [NEAR Gateway deployment path](near-gateway-deployment.md) describes the remaining provider integration and release checks.

@@ -33,7 +33,7 @@ For deployment, configure a same-origin reverse proxy for `/api`, HTTPS, and a s
 
 The gateway selects the actual model; selecting an arbitrary model in the registry does not change its deployment. Agent mandates do not start autonomous jobs. External wallet authorization is not implemented in this dashboard, so authorized-payment mode does not offer automatic settlement.
 
-NEAR provides remote verified GPU inference when the backend is configured for it. Provider usage is billed separately from local test USDC. The gateway, its session keys and receipt signer remain a software development environment. Receipt signature verification is distinct from GPU attestation; the browser relies on the gateway for the provider's hardware evidence checks.
+NEAR provides remote verified GPU inference when the backend is configured for it. Provider usage is billed separately from local test USDC. Request encryption terminates at the application gateway. Receipt signature verification is distinct from GPU attestation; the browser relies on the gateway for the provider's hardware evidence checks.
 
 ## Checks
 

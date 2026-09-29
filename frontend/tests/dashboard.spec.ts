@@ -116,10 +116,10 @@ test("unauthorized connection shows a real error and never falls back to populat
   expect(f.counts()).toEqual({ settlements: 0, inferences: 0 });
 });
 
-test("connection distinguishes NEAR GPU, software gateway and local test chain with owner history", async ({ page }) => {
+test("connection distinguishes NEAR GPU and local test chain with owner history", async ({ page }) => {
   const f = await fixture(page); await connect(page);
   await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · DEVELOPMENT GATEWAY");
-  await expect(page.locator("#environment-description")).toContainText(/gateway keys run in software/i);
+  await expect(page.locator("#environment-description")).toContainText(/remote hardware verification/i);
   await expect(page.locator("#topology-chain")).toHaveText("CHAIN 31337 · TEST USDC · x402");
   await expect(page.locator("#metric-calls")).toHaveText("7");
   await expect(page.locator("#metric-usage")).toHaveText("0.700000");

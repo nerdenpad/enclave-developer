@@ -50,8 +50,8 @@ After `npm run demo:prepare`, `npm run test:launch` starts the combined services
 
 ## Trust and deployment boundaries
 
-NEAR can supply verified remote GPU inference. The gateway, its session keys and receipt signer remain in a software development environment. Local settlement uses test USDC on Anvil chain 31337. The dashboard does not submit real-network wallet authorizations or start autonomous agent jobs.
+NEAR can supply verified remote GPU inference. Request encryption terminates at the application gateway. Local settlement uses test USDC on Anvil chain 31337. The dashboard does not submit real-network wallet authorizations or start autonomous agent jobs.
 
-The local launcher does not publish a public website. The hosted pilot uses an HTTPS reverse proxy and issued pilot API keys; production requires a user authentication layer. The Vite proxy and operator API-key field are development facilities. The backend deliberately rejects production mode while gateway key custody remains in software.
+The local launcher does not publish a public website. The hosted pilot uses an HTTPS reverse proxy and issued pilot API keys; production requires a user authentication layer. The Vite proxy and operator API-key field are development facilities. The backend rejects production mode until the NEAR Gateway release profile and deployed-path acceptance are implemented.
 
-Secrets, local `.env` profiles, CVM keys, virtual environments, dependency folders, new recordings and generated runtime files are excluded from Git. The reviewed walkthrough in `deliverables/` is tracked separately. Only configuration examples belong in a commit. This combined repository is independent of the original frontend's Lovable connection.
+Secrets, local `.env` profiles, runtime keys, virtual environments, dependency folders, new recordings and generated runtime files are excluded from Git. The reviewed walkthrough in `deliverables/` is tracked separately. Only configuration examples belong in a commit. This combined repository is independent of the original frontend's Lovable connection.

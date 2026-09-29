@@ -47,7 +47,7 @@ test("changing input cancels an in-flight RPC result and clear removes receipt a
   await page.getByRole("button", { name: "Clear", exact: true }).click();
   await expect(page.getByLabel("Or paste a single receipt")).toHaveValue(""); await expect(page.getByLabel("RPC URL", { exact: false })).toHaveValue("");
 });
-test("status is public, shows configuration and never labels the software gateway live", async ({ page }) => {
+test("status is public, shows configuration and never labels the pilot live", async ({ page }) => {
   const headers: Record<string, string>[] = [];
   await page.route("**/api/**", async route => {
     headers.push(route.request().headers());

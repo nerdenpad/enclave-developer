@@ -22,7 +22,7 @@
         <div class="form-grid"><label>Serving model<select id="model-select" disabled><option>Connect a gateway</option></select></label><label>Execution mode<select id="execution-mode"><option value="direct">Direct API request</option><option value="agent">Agent mandate</option></select></label></div>
         <div hidden id="agent-choice"><label>Agent mandate<select id="inference-agent"></select></label></div>
         <label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Ask a question to run an encrypted request…" required rows="6"></textarea>
-        <div class="prompt-examples"><button data-prompt="In three short sentences, explain what a signed inference receipt proves and what it does not prove." type="button">Receipts</button><button data-prompt="Explain the difference between a confidential GPU and a software development gateway in three short sentences." type="button">Trust boundaries</button><button data-prompt="Explain how a daily spending mandate limits AI agent payments in three short sentences." type="button">Agent commerce</button></div>
+        <div class="prompt-examples"><button data-prompt="In three short sentences, explain what a signed inference receipt proves and what it does not prove." type="button">Receipts</button><button data-prompt="Explain what NEAR GPU evidence proves about a remote inference request in three short sentences." type="button">Trust boundaries</button><button data-prompt="Explain how a daily spending mandate limits AI agent payments in three short sentences." type="button">Agent commerce</button></div>
         <div class="request-settings"><span class="field-note">AES-256-GCM encrypted request</span><span id="prompt-count">0 / 4,000</span></div>
         <p class="field-note" id="request-note">Connect to see the active model and execution environment.</p>
         <p class="form-error" id="inference-error" role="alert"></p><button class="en-button" id="run-inference" data-requires-connection disabled><span>Run inference</span><b>↗</b></button>
@@ -60,7 +60,7 @@
   </section>
   <section aria-label="Agent mandates" class="dash-view" hidden id="view-agents" role="tabpanel">
     <div class="section-heading"><div><span class="eyebrow">/AGENT MANDATES</span><h2>A mandate for every action.</h2></div><button class="en-button" id="new-agent" data-requires-connection disabled><span>Create agent</span><b>+</b></button></div>
-    <p class="section-intro">Create a persistent agent with an allowed model and a daily spending limit. Select its mandate when sending an inference request.</p><p class="field-note warning">Agent keys and state are currently held by the software gateway. Hardware wallet custody is not enabled.</p>
+    <p class="section-intro">Create a persistent agent with an allowed model and a daily spending limit. Select its mandate when sending an inference request.</p><p class="field-note warning">Agent state is encrypted in storage and processed by the application gateway during runs.</p>
     <div class="agent-grid" id="agent-cards"><p class="workspace-empty">Connect your workspace to load agent mandates.</p></div>
     <button class="text-link plain-button" id="load-more-agents" hidden>Load older agents ↓</button>
   </section>

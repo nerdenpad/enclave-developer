@@ -27,7 +27,7 @@ export function DeploymentStatusPage() {
     "Model": health.servingModel.name, "Model hash": health.servingModel.modelHash, "Serving code hash": health.servingModel.codeHash,
     "Inference provider": health.inferenceBackend,
     "Gateway policy version": String(policy.version), "Gateway policy hash": policy.policyHash, "Gateway policy binding": policy.binding ?? "Not reported",
-    "Gateway custody": "Development software; hardware key custody is not enabled",
+    "Request handling": "The application gateway decrypts requests before sending them to NEAR",
     "Receipt signer": health.receiptSigner, "Verifier contract": health.verifierAddress,
     "Settlement": health.paymentMode === "mock" ? "Mock payment flow; not a real USDC deployment" : "Signed authorization flow; token and network still require operator review",
     "Configured token": health.settlementToken ?? "Not reported", "Price per call": `${health.inferencePriceUsdc} USDC`,
@@ -41,8 +41,8 @@ export function DeploymentStatusPage() {
       <div aria-live="polite">{fields ? <dl>{Object.entries(fields).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl> : <p>{error || "Reading gateway settings…"}</p>}</div>
       <button className="en-button secondary" type="button" onClick={() => setRefresh(value => value + 1)}>Refresh status</button>
     </section><section className="panel"><h2>Current limits</h2><ul className="deployment-limits">
-      <li>The gateway, session keys, receipt signer and agent state run in software. Production mode remains blocked.</li>
-      <li>The NEAR adapter checks remote CPU and GPU evidence before sending a prompt. This does not establish hardware custody of our gateway keys. Its reviewed provider policy is separate from the gateway policy shown here.</li>
+      <li>Production mode remains blocked until the deployed inference and receipt path passes acceptance.</li>
+      <li>The NEAR adapter checks remote CPU and GPU evidence before sending a prompt. Its provider policy is separate from the application policy shown here.</li>
       <li>Local Anvil settlement uses test funds. A token address and an authorized payment mode do not prove a production USDC deployment.</li>
       <li>The browser workspace does not submit real-network wallet authorizations or launch autonomous agent jobs.</li>
       <li>A receipt signature does not by itself prove hardware attestation, payment, anchoring or the contents of a prompt and response.</li>

@@ -14,19 +14,19 @@ E1 status: **open**. Arc Mainnet contracts are deployed and the API supports aut
 | Requirement | Current evidence | Remaining work before release |
 | --- | --- | --- |
 | Public HTTPS prompt flow | Hosted pilot, HTTPS and a separate non-admin pilot API key; local browser tests | Production user authentication and acceptance on the final infrastructure |
-| Composite attestation and protected key release | NEAR provider verification is implemented | Complete a fresh hosted request under the reviewed policy and verify its evidence independently |
+| Verified NEAR GPU inference | Remote CPU/GPU verification is implemented | Complete a fresh hosted request through the supported NEAR Gateway path and verify its evidence independently |
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the configured signer and request path on the accepted deployment |
 | On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI; Arc Mainnet contracts deployed | Confirm policy bindings, signer, anchoring and confirmations on Arc |
 | USDC without duplicate charge/execution | Arc contracts deployed; API `authorized` on `5042`; relay funded; browser checkout flag still false | One accepted small real-USDC browser payment with restart/recovery evidence; then enable the public checkout flag |
 | Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
-| Production mode | The process still rejects `NODE_ENV=production` | Complete the accepted request/payment path and validate release configuration before changing the guard or label |
+| Production mode | The process still rejects `NODE_ENV=production` | Implement and validate the selected NEAR-backed release profile before changing the guard or label |
 | Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |
 
 ## Infrastructure inputs
 
 The operator must provide the final hosting configuration, production RPC capacity and confirmation policy, approved payment price, funded wallet roles, and a tested website authentication model. Public network parameters and read-only preflight are described in [Arc deployment](arc-deployment.md).
 
-Do not put provider keys, deployer keys, CVM keys, RPC credentials or deployment profiles in Git. Existing `.env*.example` files are templates only.
+Do not put provider keys, deployer keys, RPC credentials or deployment profiles in Git. Existing `.env*.example` files are templates only.
 
 ## Deployment sequence
 

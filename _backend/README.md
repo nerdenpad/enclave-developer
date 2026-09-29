@@ -2,7 +2,7 @@
 
 ENCLAVE provides a Hono/tRPC gateway, PostgreSQL state, BullMQ workers and Solidity contracts for encrypted inference requests, signed receipts, USDC payments, sealed agents, model listings and token economics. The connected dashboard is included in the sibling `frontend` directory. See the [combined repository README](../README.md) for one-command startup or [local frontend integration](docs/frontend-integration.md) for detailed backend and browser setup.
 
-Inference supports local development fixtures, an authenticated Modal development endpoint, and a `near-verified` backend with Intel TDX and NVIDIA GPU evidence verification, attested TLS binding and provider signatures. The API rejects `NODE_ENV=production` pending its release gate. Real Arc confidential transfers remain unavailable.
+Inference supports local development fixtures, an authenticated Modal development endpoint, and a `near-verified` backend with Intel TDX and NVIDIA GPU evidence verification, attested TLS binding and provider signatures. The API rejects `NODE_ENV=production` until its NEAR Gateway release profile passes acceptance. Real Arc confidential transfers remain unavailable.
 
 ## Layout
 
