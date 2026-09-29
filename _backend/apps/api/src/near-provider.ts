@@ -8,21 +8,22 @@ import { z } from "zod";
 import { AppError, sha256Hex } from "@enclave/core";
 import type { NearAttestationVerifier, NearVerifiedFetch } from "@enclave/core";
 
-export type NearProviderOptions = { pythonPath: string; policyPath: string; verifierPath?: string };
+export type NearProviderOptions = { pythonPath: string; policyPath: string; verifierPath?: string; apiKey?: string };
 const defaultVerifierPath = fileURLToPath(new URL("../../../infra/near/verify.py", import.meta.url));
 const hex32 = z.string().regex(/^(?:0x)?[0-9a-f]{64}$/i);
 const verdictSchema = z.object({
   ok: z.literal(true), signingAddress: z.string().regex(/^0x[0-9a-f]{40}$/i),
   tlsSpkiSha256: hex32, attestationRef: hex32, verifiedAt: z.string().datetime(), expiresAt: z.string().datetime(),
+  allowedSigners: z.array(z.string().regex(/^0x[0-9a-f]{40}$/i)).min(1).max(32).optional(),
 }).passthrough();
 const normalizeHex = (value: string) => value.replace(/^0x/, "").toLowerCase();
 const unavailable = () => new AppError("INFERENCE_ATTESTATION_FAILED", "NEAR hardware attestation or transport verification failed", 503);
 
 export function nearBaseUrl(value: string): URL {
   const url = new URL(value);
-  if (url.protocol !== "https:" || !/^[a-z0-9-]+\.completions\.near\.ai$/.test(url.hostname)
+  if (url.protocol !== "https:" || !(url.hostname === "cloud-api.near.ai" || /^[a-z0-9-]+\.completions\.near\.ai$/.test(url.hostname))
     || (url.port && url.port !== "443") || !["", "/", "/v1", "/v1/"].includes(url.pathname)
-    || url.username || url.password || url.search || url.hash) throw new Error("NEAR requires a direct HTTPS completions endpoint");
+    || url.username || url.password || url.search || url.hash) throw new Error("NEAR requires an approved HTTPS endpoint");
   return url;
 }
 
@@ -86,7 +87,7 @@ async function requestBytes(url: URL, init: RequestInit, agent: https.Agent, max
   });
 }
 
-export async function runNearVerifier(options: NearProviderOptions, input: unknown, signal: AbortSignal): Promise<z.infer<typeof verdictSchema>> {
+export async function runNearVerifier(options: NearProviderOptions, input: unknown, signal: AbortSignal, cloud = false): Promise<z.infer<typeof verdictSchema>> {
   signal.throwIfAborted();
   const env: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
   // The verifier only receives public hardware evidence, never inference credentials.
@@ -94,7 +95,8 @@ export async function runNearVerifier(options: NearProviderOptions, input: unkno
     if (process.env[name]) env[name] = process.env[name];
   }
   return new Promise((resolve, reject) => {
-    const child = spawn(options.pythonPath, [options.verifierPath ?? defaultVerifierPath, "--policy", options.policyPath], {
+    const child = spawn(options.pythonPath, [options.verifierPath ?? defaultVerifierPath, "--policy", options.policyPath,
+      ...(cloud ? ["--cloud"] : [])], {
       env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, signal,
     });
     const chunks: Buffer[] = [];
@@ -127,11 +129,17 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
   if (!options.pythonPath || !options.policyPath) throw new Error("NEAR verifier runtime and versioned policy are required");
   return async ({ baseUrl, model, signal }) => {
     const base = nearBaseUrl(baseUrl);
+    const cloud = base.hostname === "cloud-api.near.ai";
     const nonce = randomBytes(32).toString("hex");
     const reportUrl = new URL("/v1/attestation/report", base);
     reportUrl.searchParams.set("signing_algo", "ecdsa");
     reportUrl.searchParams.set("nonce", nonce);
     reportUrl.searchParams.set("include_tls_fingerprint", "true");
+    if (cloud) {
+      reportUrl.searchParams.set("model", model);
+      reportUrl.searchParams.set("provider", "near");
+      if (!options.apiKey?.trim() || /[\r\n]/.test(options.apiKey)) throw unavailable();
+    }
     let attestedSpki: string | undefined;
     let handedOff = false;
     // Reuse the attested connection across the provider's load balancer. Every
@@ -141,18 +149,25 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
         ? checkServerIdentity(host, cert) : checkNearCertificate(host, cert, attestedSpki),
     });
     try {
-      const { response, peerSpki } = await requestBytes(reportUrl, { signal, headers: { accept: "application/json", "accept-encoding": "identity" } }, bootstrapAgent);
+      const { response, peerSpki } = await requestBytes(reportUrl, { signal, headers: { accept: "application/json", "accept-encoding": "identity",
+        ...(cloud ? { authorization: `Bearer ${options.apiKey}`, "x-no-aliasing": "true" } : {}) } }, bootstrapAgent);
       if (response.status !== 200) throw unavailable();
       const rawReport = await response.text();
       const report = JSON.parse(rawReport) as Record<string, unknown>;
-      if (report.model_name !== model || report.request_nonce !== nonce
-        || typeof report.tls_cert_fingerprint !== "string" || normalizeHex(report.tls_cert_fingerprint) !== peerSpki) throw unavailable();
+      const gatewayReport = cloud ? report.gateway_attestation as Record<string, unknown> | undefined : report;
+      if (!gatewayReport || gatewayReport.request_nonce !== nonce
+        || typeof gatewayReport.tls_cert_fingerprint !== "string" || normalizeHex(gatewayReport.tls_cert_fingerprint) !== peerSpki
+        || (!cloud && report.model_name !== model)
+        || (cloud && (!Array.isArray(report.model_attestations) || report.model_attestations.length < 1))) throw unavailable();
       const policyBefore = await readFile(options.policyPath);
       if (policyBefore.length > 1_048_576) throw unavailable();
-      const verdict = await runNearVerifier(options, { attestation: report, nonce, tlsSpkiSha256: peerSpki }, signal);
+      const verdict = await runNearVerifier(options, cloud
+        ? { attestation: report, model, nonce, tlsSpkiSha256: peerSpki }
+        : { attestation: report, nonce, tlsSpkiSha256: peerSpki }, signal, cloud);
       const now = Date.now();
       if (normalizeHex(verdict.tlsSpkiSha256) !== peerSpki
-        || typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase()
+        || (!cloud && (typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase()))
+        || (cloud && (!verdict.allowedSigners || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
         || Date.parse(verdict.verifiedAt) > now + 5_000 || Date.parse(verdict.verifiedAt) < now - 300_000
         || Date.parse(verdict.expiresAt) <= now || Date.parse(verdict.expiresAt) > Date.parse(verdict.verifiedAt) + 300_000
         || !policyBefore.equals(await readFile(options.policyPath))) throw unavailable();
@@ -164,7 +179,7 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
         return wire.response;
       };
       const session = {
-        allowedSigners: [verdict.signingAddress as `0x${string}`],
+        allowedSigners: (verdict.allowedSigners ?? [verdict.signingAddress]) as `0x${string}`[],
         attestationRef: `0x${normalizeHex(verdict.attestationRef)}` as `0x${string}`,
         verifiedAt: verdict.verifiedAt, expiresAt: verdict.expiresAt, tlsBound: true as const,
         fetch: pinnedFetch, close: () => bootstrapAgent.destroy(),

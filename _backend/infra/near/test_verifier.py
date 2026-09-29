@@ -3,6 +3,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import struct
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,123 @@ def fixture():
     return doc, policy, cpu, manager_cpu
 
 
+def gateway_fixture():
+    nonce, spki, signer = NONCE, SPKI, SIGNER
+    compose = '{"service":"gateway"}'
+    event = {"imr": 3, "event_type": 7, "event": "app-id", "event_payload": "abcd"}
+    event_digest = hashlib.sha384(struct.pack("<I", 7) + b":app-id:" + bytes.fromhex("abcd")).digest()
+    event["digest"] = event_digest.hex()
+    rtmr3 = hashlib.sha384(bytes(48) + event_digest).hexdigest()
+    measurements = {key: "00" * size for key, size in v.MEASUREMENTS.items()}
+    measurements["mr_config_id"] = "01" + v.digest(compose.encode()) + "00" * 15
+    measurements["rt_mr3"] = rtmr3
+    report_data = v.digest(bytes.fromhex(signer[2:] + spki)) + nonce
+    cpu = {"status": "UpToDate", "advisory_ids": [], "report": {"TD10": {
+        **measurements, "report_data": report_data}}, "ppid": "78" * 16,
+        "qe_status": {"status": "UpToDate", "advisory_ids": []},
+        "platform_status": {"status": "UpToDate", "advisory_ids": []}}
+    document = {"nonce": nonce, "tlsSpkiSha256": spki, "gateway_attestation": {
+        "signing_algo": "ecdsa", "signing_address": signer, "request_nonce": nonce,
+        "tls_cert_fingerprint": spki, "report_data": report_data,
+        "intel_quote": "aa" * 600, "event_log": json.dumps([event]),
+        "info": {"tcb_info": {"app_compose": compose}}}}
+    return document, cpu
+
+
+class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cloud_requires_all_model_candidates_and_the_gateway(self):
+        document, cpu = gateway_fixture()
+        policy = self.gateway_policy(document, cpu)
+        candidate = {"model_name": "example/model", "tls_cert_fingerprint": "ab" * 32,
+                     "signing_address": SIGNER, "event_log": [{"imr": 3}]}
+        cloud = {"nonce": NONCE, "tlsSpkiSha256": SPKI, "model": "example/model",
+                 "attestation": {"gateway_attestation": document["gateway_attestation"],
+                                 "model_attestations": [candidate]}}
+        model_verdict = {"signingAddress": SIGNER, "attestationRef": "0x" + "ab" * 32,
+                         "expiresAt": v.iso(NOW + 60)}
+        with patch.object(v, "verify_gateway", new=AsyncMock(return_value={
+                "signingAddress": "0x" + "78" * 20, "attestationRef": "0x" + "cd" * 32,
+                "expiresAt": v.iso(NOW + 60)})) as gateway_check, \
+                patch.object(v, "verify", new=AsyncMock(return_value=model_verdict)) as model_check, \
+                patch.object(v.time, "time", return_value=NOW):
+            verdict = await v.verify_cloud(cloud, policy)
+            self.assertEqual(verdict["allowedSigners"], [SIGNER])
+            self.assertEqual(verdict["tlsSpkiSha256"], SPKI)
+            gateway_check.assert_awaited_once()
+            model_check.assert_awaited_once()
+            cloud["attestation"]["model_attestations"].append({**candidate, "signing_address": "0x" + "99" * 20})
+            with self.assertRaises(v.VerificationError) as error:
+                await v.verify_cloud(cloud, policy)
+            self.assertEqual(error.exception.code, "MODEL_EVIDENCE_DUPLICATE")
+            cloud["attestation"]["model_attestations"][1]["model_name"] = "other/model"
+            with self.assertRaises(v.VerificationError) as error:
+                await v.verify_cloud(cloud, policy)
+            self.assertEqual(error.exception.code, "MODEL_EVIDENCE_INVALID")
+            cloud["attestation"]["model_attestations"] = []
+            with self.assertRaises(v.VerificationError) as error:
+                await v.verify_cloud(cloud, policy)
+            self.assertEqual(error.exception.code, "MODEL_EVIDENCE_MISSING")
+
+    def gateway_policy(self, document, cpu):
+        return {"schemaVersion": 1, "version": "gateway-reviewed-1",
+                "validFrom": v.iso(NOW - 60), "validUntil": v.iso(NOW + 600),
+                "maxSessionSeconds": 120, "gatewayProfiles": [{
+                    "appComposeSha256": v.digest(document["gateway_attestation"]["info"]["tcb_info"]["app_compose"].encode()),
+                    "measurements": {key: cpu["report"]["TD10"][key] for key in v.MEASUREMENTS}}]}
+
+    async def test_gateway_authorization_requires_reviewed_complete_profile(self):
+        document, cpu = gateway_fixture()
+        policy = self.gateway_policy(document, cpu)
+        with patch.object(v, "verify_tdx", new=AsyncMock(return_value=cpu)), patch.object(v.time, "time", return_value=NOW):
+            verdict = await v.verify_gateway(document, policy)
+            self.assertTrue(verdict["ok"])
+            self.assertEqual(verdict["policyVersion"], "gateway-reviewed-1")
+            self.assertEqual(verdict["expiresAt"], v.iso(NOW + 120))
+            policy["gatewayProfiles"][0]["measurements"]["mr_td"] = "ff" * 48
+            with self.assertRaises(v.VerificationError) as error:
+                await v.verify_gateway(document, policy)
+            self.assertEqual(error.exception.code, "GATEWAY_POLICY_MISMATCH")
+            policy["gatewayProfiles"][0]["measurements"].pop("rt_mr3")
+            with self.assertRaises(v.VerificationError) as error:
+                await v.verify_gateway(document, policy)
+            self.assertEqual(error.exception.code, "POLICY_INVALID")
+
+    async def test_verified_quote_binds_nonce_tls_signer_compose_and_events(self):
+        document, cpu = gateway_fixture()
+        with patch.object(v, "verify_tdx", new=AsyncMock(return_value=cpu)):
+            result = await v.inspect_gateway_report(document)
+        self.assertEqual(result["signingAddress"], SIGNER)
+        self.assertEqual(result["measurements"]["rt_mr3"], cpu["report"]["TD10"]["rt_mr3"])
+
+    async def test_gateway_rejects_unbound_or_modified_evidence(self):
+        for change, expected in (
+            (lambda d, c: d.update(nonce="ab" * 32), "NONCE_MISMATCH"),
+            (lambda d, c: d.update(tlsSpkiSha256="ab" * 32), "TLS_BINDING_MISMATCH"),
+            (lambda d, c: d["gateway_attestation"].update(signing_address="0x" + "ab" * 20), "CPU_BINDING_MISMATCH"),
+            (lambda d, c: d["gateway_attestation"].update(report_data="ab" * 64), "CPU_BINDING_MISMATCH"),
+            (lambda d, c: d["gateway_attestation"]["info"]["tcb_info"].update(app_compose="altered"), "GATEWAY_COMPOSE_MISMATCH"),
+            (lambda d, c: d["gateway_attestation"].update(event_log=json.dumps([{"imr": 3, "event_type": 7, "event": "changed", "event_payload": "abcd", "digest": ""}])), "GATEWAY_EVENT_LOG_MISMATCH"),
+            (lambda d, c: c.update(status="OutOfDate"), "CPU_TCB_REJECTED"),
+        ):
+            with self.subTest(expected=expected):
+                document, cpu = gateway_fixture()
+                change(document, cpu)
+                with patch.object(v, "verify_tdx", new=AsyncMock(return_value=cpu)):
+                    with self.assertRaises(v.VerificationError) as error:
+                        await v.inspect_gateway_report(document)
+                self.assertEqual(error.exception.code, expected)
+
+    def test_gateway_rejects_invalid_event_digest_and_missing_rtmr3(self):
+        document, _ = gateway_fixture()
+        events = json.loads(document["gateway_attestation"]["event_log"])
+        events[0]["digest"] = "00" * 48
+        with self.assertRaises(v.VerificationError) as error:
+            v.replay_rtmr3(events)
+        self.assertEqual(error.exception.code, "GATEWAY_EVENT_LOG_INVALID")
+        with self.assertRaises(v.VerificationError):
+            v.replay_rtmr3([{"imr": 0}])
+
+
 class VerifierTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.doc, self.policy, self.cpu, self.manager_cpu = fixture()
@@ -121,6 +239,16 @@ class VerifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_signing_algorithm_rejected(self):
         self.doc["attestation"]["signing_algo"] = "ed25519"
         await self.rejected("SIGNING_ALGORITHM_REJECTED")
+
+    async def test_model_event_log_must_match_verified_quote(self):
+        event = {"imr": 3, "event_type": 7, "event": "model-image", "event_payload": "abcd", "digest": ""}
+        self.doc["attestation"]["event_log"] = [event]
+        await self.rejected("MODEL_EVENT_LOG_MISMATCH")
+        measured = v.replay_rtmr3([event])
+        for cpu in (self.cpu, self.manager_cpu):
+            cpu["report"]["TD10"]["rt_mr3"] = measured
+        self.policy["profiles"][0]["measurements"]["rt_mr3"] = measured
+        self.assertTrue((await v.verify(self.doc, self.policy))["ok"])
 
     async def test_old_tcb_or_advisories_even_with_valid_signature_rejected(self):
         for target in [self.cpu, self.manager_cpu, self.cpu["qe_status"], self.cpu["platform_status"]]:

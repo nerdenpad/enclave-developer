@@ -81,7 +81,7 @@ const envSchema = z.object({
   }
   if (env.INFERENCE_BACKEND === "near-verified") {
     try { nearBaseUrl(env.INFERENCE_BASE_URL); }
-    catch { ctx.addIssue({ code: "custom", path: ["INFERENCE_BASE_URL"], message: "NEAR requires a direct HTTPS completions endpoint" }); }
+    catch { ctx.addIssue({ code: "custom", path: ["INFERENCE_BASE_URL"], message: "NEAR requires an approved HTTPS endpoint" }); }
     if (!env.INFERENCE_ALLOW_REMOTE) ctx.addIssue({ code: "custom", path: ["INFERENCE_ALLOW_REMOTE"], message: "NEAR requires explicit remote inference opt-in" });
     if (!env.INFERENCE_API_KEY?.trim() || /[\r\n]/.test(env.INFERENCE_API_KEY)) ctx.addIssue({ code: "custom", path: ["INFERENCE_API_KEY"], message: "NEAR API key is required" });
     for (const field of ["NEAR_VERIFIER_PYTHON", "NEAR_ATTESTATION_POLICY"] as const) {

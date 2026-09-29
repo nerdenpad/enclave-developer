@@ -18,16 +18,16 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 // Public, disposable test credentials. They never authenticate a live service.
 const cert = `-----BEGIN CERTIFICATE-----
-MIIBwDCCAWagAwIBAgIUMQD2oAhGlSfJ3DB3NudSKladuXowCgYIKoZIzj0EAwIw
-IzEhMB8GA1UEAwwYdGVzdC5jb21wbGV0aW9ucy5uZWFyLmFpMB4XDTI2MDkxOTE2
-NTA0NVoXDTM2MDkxNjE2NTA0NVowIzEhMB8GA1UEAwwYdGVzdC5jb21wbGV0aW9u
+MIIB1jCCAXugAwIBAgIUQH167SxubumFz1674ZsxL2voIJQwCgYIKoZIzj0EAwIw
+IzEhMB8GA1UEAwwYdGVzdC5jb21wbGV0aW9ucy5uZWFyLmFpMB4XDTI2MDkyODE3
+NDMwMVoXDTM2MDkyNjE3NDMwMVowIzEhMB8GA1UEAwwYdGVzdC5jb21wbGV0aW9u
 cy5uZWFyLmFpMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKM+30DfU/cWgtugL
 zenTuJa/dseF3VDZMIVO55+ESL7d58jcFK2g8F7zjUIkHRz8hHeGly2MvqsxTrJq
-Aer9tqN4MHYwHQYDVR0OBBYEFHR6Yox1SFx518FhZ2mkJVfXADW4MB8GA1UdIwQY
-MBaAFHR6Yox1SFx518FhZ2mkJVfXADW4MCMGA1UdEQQcMBqCGHRlc3QuY29tcGxl
-dGlvbnMubmVhci5haTAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gAMEUC
-IQChTUAFwWg8iwVoHaabSL+IVum2d8ttEN0YQ7VyzPQAnAIgb+VJPWM2zd2DJxWv
-O7HIzMtDXaZiAPMrC9zWZDKbttU=
+Aer9tqOBjDCBiTAdBgNVHQ4EFgQUdHpijHVIXHnXwWFnaaQlV9cANbgwHwYDVR0j
+BBgwFoAUdHpijHVIXHnXwWFnaaQlV9cANbgwNgYDVR0RBC8wLYIYdGVzdC5jb21w
+bGV0aW9ucy5uZWFyLmFpghFjbG91ZC1hcGkubmVhci5haTAPBgNVHRMBAf8EBTAD
+AQH/MAoGCCqGSM49BAMCA0kAMEYCIQClzAGEXrd05jxXQTUK2SCe+qt5PMfNQOC+
+XH9PIYc1DQIhAKxa3TQR4Ojd6kgD8Drpoynvkm1HlNiFdTRseWg20C9a
 -----END CERTIFICATE-----`;
 const key = `-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgG2E0eisJeTuHZkRF
@@ -54,6 +54,8 @@ ycbxH551EaMuGrn0I/MfxfEBF82DI/B0tsz1++Z7eyCtI/R8Eu2etk19
 
 const host = "test.completions.near.ai";
 const baseUrl = `https://${host}/v1`;
+const cloudHost = "cloud-api.near.ai";
+const cloudBaseUrl = `https://${cloudHost}/v1`;
 const model = "Qwen/Test";
 const signingAddress = `0x${"11".repeat(20)}`;
 const hash32 = "aa".repeat(32);
@@ -67,7 +69,7 @@ let server: Server;
 let port: number;
 let requestHook: ((request: IncomingMessage, response: ServerResponse) => boolean) | undefined;
 let reportChanges: Record<string, unknown>;
-let calls: { url: string; method: string | undefined; authorization: string | undefined; body: string; remotePort: number | undefined }[];
+let calls: { url: string; method: string | undefined; authorization: string | undefined; noAliasing: string | undefined; body: string; remotePort: number | undefined }[];
 const sessions: NearVerifiedSession[] = [];
 const agents = new Set<https.Agent>();
 
@@ -84,6 +86,7 @@ else {
   if (policy.mode === 'policy-change') await writeFile(path, JSON.stringify({ changed: true }));
   const result = { ok: true, signingAddress: data.attestation?.signing_address ?? '${signingAddress}', tlsSpkiSha256: data.tlsSpkiSha256,
     attestationRef: '${hash32}', verifiedAt: new Date().toISOString(), expiresAt: new Date(Date.now()+60000).toISOString(),
+    ...(data.model ? { allowedSigners: ['${signingAddress}'] } : {}),
     cpuStatus: 'fixture', gpuCount: 1, measurements: { fixture: true }, receivedNonce: data.nonce,
     secretEnvNames: ['INFERENCE_API_KEY','DEPLOYER_PRIVATE_KEY','NEAR_FAKE_SECRET','NODE_OPTIONS'].filter(name=>process.env[name]),
     ...policy.verdict };
@@ -107,13 +110,17 @@ beforeEach(async () => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
     req.on("end", () => {
-      calls.push({ url: req.url!, method: req.method, authorization: req.headers.authorization, body: Buffer.concat(chunks).toString("utf8"), remotePort: req.socket.remotePort });
+      calls.push({ url: req.url!, method: req.method, authorization: req.headers.authorization,
+        noAliasing: req.headers["x-no-aliasing"] as string | undefined,
+        body: Buffer.concat(chunks).toString("utf8"), remotePort: req.socket.remotePort });
       if (requestHook?.(req, res)) return;
       const url = new URL(req.url!, baseUrl);
       if (url.pathname === "/v1/attestation/report") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ model_name: model, request_nonce: url.searchParams.get("nonce"), tls_cert_fingerprint: spki,
-          signing_address: signingAddress, ...reportChanges }));
+        const evidence = { model_name: model, request_nonce: url.searchParams.get("nonce"), tls_cert_fingerprint: spki,
+          signing_address: signingAddress, ...reportChanges };
+        res.end(JSON.stringify(req.headers.host?.startsWith(cloudHost)
+          ? { gateway_attestation: evidence, model_attestations: [evidence] } : evidence));
       } else { res.setHeader("content-type", "application/json"); res.end(' {"output":"test answer"}\n'); }
     });
   });
@@ -122,11 +129,12 @@ beforeEach(async () => {
   port = (server.address() as { port: number }).port;
   // Route only the approved test hostname to loopback, preserving real TLS validation and pin checks.
   vi.spyOn(https, "request").mockImplementation(((url: URL, options: RequestOptions, callback: (res: IncomingMessage) => void) => {
-    if (url.hostname !== host) throw new Error("Test attempted a non-loopback request");
+    if (![host, cloudHost].includes(url.hostname)) throw new Error("Test attempted a non-loopback request");
     const agent = options.agent as https.Agent;
     agents.add(agent);
     agent.options.ca = [cert, secondCert];
-    return originalRequest(url, { ...options, hostname: "127.0.0.1", port, servername: host }, callback);
+    return originalRequest(url, { ...options, hostname: "127.0.0.1", port, servername: url.hostname,
+      headers: { ...options.headers, host: url.hostname } }, callback);
   }) as typeof https.request);
 });
 
@@ -165,10 +173,55 @@ describe("NEAR transport trust boundaries", () => {
     expect(checkNearCertificate(host, { ...peer, raw: Buffer.from("invalid cert") }, spki)).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
   });
 
-  it.each(["http://test.completions.near.ai/v1", "https://cloud-api.near.ai/v1", "https://test.completions.near.ai.attacker.example/v1",
+  it.each(["http://test.completions.near.ai/v1", "https://test.completions.near.ai.attacker.example/v1",
     `${baseUrl}?key=secret`, `${baseUrl}#x`, `${baseUrl}/other`, "https://test.completions.near.ai:8443/v1", "https://user:pass@test.completions.near.ai/v1"])("rejects unsafe base URL %#", (url) => {
     expect(() => nearBaseUrl(url)).toThrow();
     expect(calls).toHaveLength(0);
+  });
+
+  it("accepts only the exact cloud gateway hostname", () => {
+    expect(nearBaseUrl("https://cloud-api.near.ai/v1").hostname).toBe("cloud-api.near.ai");
+    expect(() => nearBaseUrl("https://cloud-api.near.ai.evil.example/v1")).toThrow();
+  });
+
+  it("preflights cloud gateway and model reports before exposing the pinned connection", async () => {
+    const apiKey = "fixture-cloud-key";
+    const verified = await createNearAttestationVerifier({ ...runtime(), apiKey })({
+      baseUrl: cloudBaseUrl, model, signal: AbortSignal.timeout(5_000),
+    });
+    sessions.push(verified);
+    expect(calls).toHaveLength(1);
+    const reportUrl = new URL(calls[0]!.url, cloudBaseUrl);
+    expect(reportUrl.searchParams.get("model")).toBe(model);
+    expect(reportUrl.searchParams.get("provider")).toBe("near");
+    expect(reportUrl.searchParams.get("include_tls_fingerprint")).toBe("true");
+    expect(calls[0]).toMatchObject({ authorization: `Bearer ${apiKey}`, noAliasing: "true" });
+    expect(verified.allowedSigners).toEqual([signingAddress]);
+    const proof = JSON.parse(verified.attestationProof!);
+    expect(proof.report.model_attestations).toHaveLength(1);
+    expect(proof.verdict.allowedSigners).toEqual([signingAddress]);
+    expect(JSON.stringify(proof)).not.toContain(apiKey);
+    expect(await (await verified.fetch(new URL(`${cloudBaseUrl}/chat/completions`), {
+      method: "POST", headers: { authorization: `Bearer ${apiKey}`, "x-no-aliasing": "true" }, body: "private prompt",
+    })).text()).toContain("test answer");
+    expect(calls[1]!.remotePort).toBe(calls[0]!.remotePort);
+  });
+
+  it("does not send a cloud prompt when model reports or credentials are missing", async () => {
+    await expect(createNearAttestationVerifier(runtime())({ baseUrl: cloudBaseUrl, model,
+      signal: AbortSignal.timeout(5_000) })).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    expect(calls).toHaveLength(0);
+    requestHook = (req, res) => {
+      if (!req.url?.startsWith("/v1/attestation/report")) return false;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ gateway_attestation: { request_nonce: new URL(req.url, cloudBaseUrl).searchParams.get("nonce"),
+        tls_cert_fingerprint: spki }, model_attestations: [] }));
+      return true;
+    };
+    await expect(createNearAttestationVerifier({ ...runtime(), apiKey: "fixture" })({ baseUrl: cloudBaseUrl, model,
+      signal: AbortSignal.timeout(5_000) })).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    expect(calls).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
   });
 
   it("requires an explicit verifier and versioned policy", () => {

@@ -116,10 +116,11 @@ describe("verified NEAR configuration", () => {
     expect(loadConfig(configured)).toMatchObject({ INFERENCE_BACKEND: "near-verified", TEE_MODE: "dev", NEAR_MAX_TOKENS: 512,
       NEAR_VERIFIER_PYTHON: "python", NEAR_ATTESTATION_POLICY: "/fixture/policy.json" });
     expect(loadConfig({ ...configured, NEAR_MAX_TOKENS: "64", INFERENCE_HEALTH_PATH: "" }).NEAR_MAX_TOKENS).toBe(64);
+    expect(loadConfig({ ...configured, INFERENCE_BASE_URL: "https://cloud-api.near.ai/v1" }).INFERENCE_BASE_URL).toBe("https://cloud-api.near.ai/v1");
   });
 
   it.each([
-    { INFERENCE_BASE_URL: "https://cloud-api.near.ai/v1" }, { INFERENCE_BASE_URL: "http://test.completions.near.ai/v1" },
+    { INFERENCE_BASE_URL: "http://test.completions.near.ai/v1" },
     { INFERENCE_BASE_URL: "https://test.completions.near.ai.attacker.example/v1" }, { INFERENCE_BASE_URL: "https://test.completions.near.ai/v1?secret=bad" },
     { INFERENCE_ALLOW_REMOTE: "false" }, { INFERENCE_API_KEY: undefined }, { INFERENCE_API_KEY: " " },
     { NEAR_VERIFIER_PYTHON: undefined }, { NEAR_ATTESTATION_POLICY: undefined }, { INFERENCE_HEALTH_PATH: "/health" },

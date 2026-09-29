@@ -42,6 +42,31 @@ beforeEach(() => {
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
+describe("verified NEAR cloud gateway inference", () => {
+  const cloudSettings = { ...settings, baseUrl: "https://cloud-api.near.ai/v1" };
+
+  it("requires a model TEE signature and sends the canonical model without aliasing", async () => {
+    transport.mockImplementation(async (_url, init) => {
+      if (init.method === "POST") { requestBody = init.body as string; return new Response(rawResponse); }
+      return signatureResponse({ signature_kind: "provider_tee" });
+    });
+    const result = await createNearInference(cloudSettings)(Buffer.from("prompt"));
+    expect(transport.mock.calls[0]![0].href).toBe("https://cloud-api.near.ai/v1/chat/completions");
+    expect(transport.mock.calls[0]![1].headers).toMatchObject({ "x-no-aliasing": "true" });
+    expect(JSON.parse(requestBody).model).toBe(model);
+    expect(await verifyNearTranscript(result.evidence, result.transcript)).toBe(true);
+  });
+
+  it("rejects a gateway-only or unspecified signature kind", async () => {
+    await expect(createNearInference(cloudSettings)(Buffer.from("prompt"))).rejects.toThrow("does not bind this inference");
+    transport.mockImplementation(async (_url, init) => {
+      if (init.method === "POST") { requestBody = init.body as string; return new Response(rawResponse); }
+      return signatureResponse({ signature_kind: "gateway" });
+    });
+    await expect(createNearInference(cloudSettings)(Buffer.from("prompt"))).rejects.toThrow("does not bind this inference");
+  });
+});
+
 describe("verified direct NEAR inference", () => {
   it("attests before sending the prompt and verifies exact bytes, signature and signer", async () => {
     const result = await createNearInference(settings)(Buffer.from("Private question 🔐"));
@@ -129,7 +154,7 @@ describe("verified direct NEAR inference", () => {
     expect(transport.mock.calls[0]![0].href).toBe(`${baseUrl}/chat/completions`);
   });
 
-  it.each(["broken", "http://test.completions.near.ai/v1", "https://cloud-api.near.ai/v1", "https://evil.example/v1",
+  it.each(["broken", "http://test.completions.near.ai/v1", "https://evil.example/v1",
     "https://test.completions.near.ai.evil.example/v1", "https://user:secret@test.completions.near.ai/v1",
     `${baseUrl}?secret=x`, `${baseUrl}#fragment`, `${baseUrl}/chat/completions`, "https://test.completions.near.ai:8443/v1"])("rejects an unsafe or non-direct endpoint %#", (url) => {
     expect(() => createNearInference({ ...settings, baseUrl: url })).toThrow();
@@ -315,7 +340,7 @@ describe("independent NEAR transcript consistency verification", () => {
 
   it.each([
     { schemaVersion: 2 }, { provider: "other" }, { signatureKind: "gateway" }, { tlsBound: false },
-    { endpoint: "https://cloud-api.near.ai" }, { model: "Other/Model" }, { completionId: "other" },
+    { endpoint: "https://evil.example" }, { model: "Other/Model" }, { completionId: "other" },
     { requestHash: attestationRef }, { responseHash: attestationRef }, { outputHash: attestationRef },
     { signatureText: "different" }, { signingAddress: other.address }, { signature: "0x00" },
     { attestationRef: "bad" }, { verifiedAt: "bad" }, { expiresAt: "bad" },

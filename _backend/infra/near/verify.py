@@ -5,12 +5,15 @@ import json
 import sys
 from pathlib import Path
 
-from verifier import MAX_DOCUMENT_BYTES, VerificationError, parse_json, verify
+from verifier import MAX_DOCUMENT_BYTES, VerificationError, parse_json, verify, verify_cloud, verify_gateway
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", required=True)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--gateway", action="store_true", help="Verify a NEAR AI Cloud gateway report")
+    mode.add_argument("--cloud", action="store_true", help="Verify gateway and all model candidates")
     args = parser.parse_args()
     try:
         raw = sys.stdin.buffer.read(MAX_DOCUMENT_BYTES + 1)
@@ -20,7 +23,8 @@ def main():
             policy = source.read(MAX_DOCUMENT_BYTES + 1)
         if len(policy) > MAX_DOCUMENT_BYTES:
             raise VerificationError("POLICY_INVALID")
-        result = asyncio.run(verify(parse_json(raw), parse_json(policy)))
+        operation = verify_cloud if args.cloud else verify_gateway if args.gateway else verify
+        result = asyncio.run(operation(parse_json(raw), parse_json(policy)))
         print(json.dumps(result, separators=(",", ":")))
         return 0
     except VerificationError as error:

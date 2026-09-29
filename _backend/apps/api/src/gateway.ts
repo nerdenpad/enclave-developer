@@ -165,7 +165,7 @@ export class EnclaveGateway {
         ...(config.INFERENCE_BACKEND === "near-verified" ? { verifiedInference: createNearInference({
           baseUrl: config.INFERENCE_BASE_URL, model: config.INFERENCE_MODEL, apiKey: config.INFERENCE_API_KEY!,
           timeoutMs: config.INFERENCE_TIMEOUT_MS, maxTokens: config.NEAR_MAX_TOKENS,
-          verifyAttestation: createNearAttestationVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY! }),
+          verifyAttestation: createNearAttestationVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY!, apiKey: config.INFERENCE_API_KEY! }),
         }) } : {}),
         chainId: config.ARC_CHAIN_ID,
         verifyingContract: config.ATTESTATION_VERIFIER_ADDRESS as `0x${string}`,

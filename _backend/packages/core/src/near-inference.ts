@@ -102,9 +102,9 @@ function endpoint(value: string): URL {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("Invalid NEAR inference URL"); }
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
-    || url.port || !/^[a-z0-9-]+\.completions\.near\.ai$/.test(url.hostname)
+    || url.port || !(url.hostname === "cloud-api.near.ai" || /^[a-z0-9-]+\.completions\.near\.ai$/.test(url.hostname))
     || !["", "/", "/v1", "/v1/"].includes(url.pathname)) {
-    throw new Error("NEAR inference requires a direct HTTPS completions endpoint");
+    throw new Error("NEAR inference requires an approved HTTPS endpoint");
   }
   url.pathname = "/v1/";
   return url;
@@ -212,6 +212,7 @@ export async function verifyNearTranscript(
 /** Verifies NEAR provider execution; this does not turn the calling process into a hardware TEE. */
 export function createNearInference(options: NearInferenceOptions): NearInferenceAdapter {
   const base = endpoint(options.baseUrl);
+  const cloudGateway = base.hostname === "cloud-api.near.ai";
   const model = options.model.trim();
   const apiKey = options.apiKey.trim();
   if (!model || model.length > 512 || /[\r\n:]/.test(model)) throw new Error("Invalid NEAR inference model");
@@ -226,7 +227,8 @@ export function createNearInference(options: NearInferenceOptions): NearInferenc
   if (typeof enableThinking !== "boolean") throw new Error("Invalid NEAR inference thinking option");
   const attempts = limit(options.maxSignatureAttempts ?? 5, 10);
   const retryDelayMs = limit(options.signatureRetryDelayMs ?? 250, 5_000);
-  const headers = { authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "application/json", "accept-encoding": "identity" };
+  const headers = { authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "application/json", "accept-encoding": "identity",
+    ...(cloudGateway ? { "x-no-aliasing": "true" } : {}) };
 
   return async (plaintext) => {
     if (plaintext.length > maxRequestBytes) throw new ValidationError({ prompt: "NEAR request exceeds the byte limit" });
@@ -276,7 +278,8 @@ export function createNearInference(options: NearInferenceOptions): NearInferenc
           throw new NearError(`NEAR signature returned HTTP ${proofResponse.status}`);
         }
         const proof = signatureSchema.safeParse(parseJson(await readBody(proofResponse, 16_384, signal)));
-        if (!proof.success || proof.data.text !== signatureText) throw new NearError("NEAR signature payload does not bind this inference");
+        if (!proof.success || proof.data.text !== signatureText
+          || (cloudGateway && proof.data.signature_kind !== "provider_tee")) throw new NearError("NEAR signature payload does not bind this inference");
         const sig = proof.data.signature as Hex;
         const recovered = await bounded(recoverCanonicalSignature(signatureText, sig), signal);
         if (recovered.toLowerCase() !== proof.data.signing_address.toLowerCase()

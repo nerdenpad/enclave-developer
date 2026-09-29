@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import re
+import struct
 import time
 from datetime import datetime, timezone
 
@@ -149,6 +150,107 @@ def cpu_claims(result):
     return {key: td[key].lower() for key in (*MEASUREMENTS, "report_data")}
 
 
+def replay_rtmr3(event_log):
+    """Recompute the measured RTMR3 events; unmeasured HTTP text is not trusted."""
+    events = parse_json(event_log) if isinstance(event_log, str) else event_log
+    require(isinstance(events, list) and 1 <= len(events) <= 10000, "GATEWAY_EVENT_LOG_INVALID")
+    state = bytes(48)
+    measured = 0
+    for entry in events:
+        require(isinstance(entry, dict) and type(entry.get("imr")) is int,
+                "GATEWAY_EVENT_LOG_INVALID")
+        if entry["imr"] != 3:
+            continue
+        event_type = entry.get("event_type")
+        event = entry.get("event")
+        payload = entry.get("event_payload")
+        require(type(event_type) is int and 0 <= event_type <= 0xffffffff
+                and isinstance(event, str) and isinstance(payload, str), "GATEWAY_EVENT_LOG_INVALID")
+        require(len(event.encode("utf-8")) <= 65536 and len(payload) <= 131072
+                and len(payload) % 2 == 0 and re.fullmatch(r"[0-9a-fA-F]*", payload),
+                "GATEWAY_EVENT_LOG_INVALID")
+        event_digest = hashlib.sha384(struct.pack("<I", event_type) + b":"
+                                      + event.encode("utf-8") + b":" + bytes.fromhex(payload)).digest()
+        declared = entry.get("digest", "")
+        require(declared == "" or hex_bytes(declared, 48, "GATEWAY_EVENT_LOG_INVALID") == event_digest,
+                "GATEWAY_EVENT_LOG_INVALID")
+        state = hashlib.sha384(state + event_digest).digest()
+        measured += 1
+    require(measured > 0, "GATEWAY_EVENT_LOG_INVALID")
+    return state.hex()
+
+
+async def inspect_gateway_report(document):
+    """Verify gateway hardware and TLS facts; this does not approve its measurements."""
+    require(isinstance(document, dict), "INPUT_INVALID")
+    nonce = hex_bytes(document.get("nonce"), 32)
+    spki = hex_bytes(document.get("tlsSpkiSha256"), 32)
+    gateway = document.get("gateway_attestation")
+    require(isinstance(gateway, dict), "GATEWAY_EVIDENCE_MISSING")
+    require(gateway.get("signing_algo") == "ecdsa", "SIGNING_ALGORITHM_REJECTED")
+    identity = gateway.get("signing_address")
+    require(isinstance(identity, str) and identity.startswith("0x"), "GATEWAY_SIGNER_INVALID")
+    signer = hex_bytes(identity[2:], 20, "GATEWAY_SIGNER_INVALID")
+    require(hex_bytes(gateway.get("request_nonce"), 32, "NONCE_MISMATCH") == nonce,
+            "NONCE_MISMATCH")
+    require(hex_bytes(gateway.get("tls_cert_fingerprint"), 32, "TLS_BINDING_MISMATCH") == spki,
+            "TLS_BINDING_MISMATCH")
+    result = await verify_tdx(gateway.get("intel_quote"))
+    claims = cpu_claims(result)
+    expected_report_data = hashlib.sha256(signer + spki).hexdigest() + nonce.hex()
+    require(claims["report_data"] == expected_report_data, "CPU_BINDING_MISMATCH")
+    require(hex_bytes(gateway.get("report_data"), 64, "CPU_BINDING_MISMATCH").hex()
+            == claims["report_data"], "CPU_BINDING_MISMATCH")
+    require(replay_rtmr3(gateway.get("event_log")) == claims["rt_mr3"],
+            "GATEWAY_EVENT_LOG_MISMATCH")
+    info = gateway.get("info")
+    require(isinstance(info, dict), "GATEWAY_EVIDENCE_MISSING")
+    tcb = info.get("tcb_info")
+    tcb = parse_json(tcb) if isinstance(tcb, str) else tcb
+    require(isinstance(tcb, dict) and isinstance(tcb.get("app_compose"), str),
+            "GATEWAY_EVIDENCE_MISSING")
+    app_hash = hashlib.sha256(tcb["app_compose"].encode("utf-8")).hexdigest()
+    require(claims["mr_config_id"] == "01" + app_hash + "00" * 15,
+            "GATEWAY_COMPOSE_MISMATCH")
+    return {"signingAddress": identity.lower(), "tlsSpkiSha256": spki.hex(),
+            "measurements": {key: claims[key] for key in MEASUREMENTS},
+            "appComposeSha256": app_hash, "quoteSha256": digest(bytes.fromhex(gateway["intel_quote"]))}
+
+
+async def verify_gateway(document, policy):
+    """Authorize an independently verified gateway against one reviewed measurement profile."""
+    now = time.time()
+    require(isinstance(policy, dict) and policy.get("schemaVersion") == 1, "POLICY_INVALID")
+    require(isinstance(policy.get("version"), str) and 1 <= len(policy["version"]) <= 128,
+            "POLICY_INVALID")
+    start, end = timestamp(policy.get("validFrom")), timestamp(policy.get("validUntil"))
+    require(start <= now < end, "POLICY_EXPIRED")
+    session = policy.get("maxSessionSeconds")
+    require(type(session) is int and 1 <= session <= 300, "POLICY_INVALID")
+    profiles = policy.get("gatewayProfiles")
+    require(isinstance(profiles, list) and 1 <= len(profiles) <= 32, "POLICY_INVALID")
+    for profile in profiles:
+        require(isinstance(profile, dict), "POLICY_INVALID")
+        hex_bytes(profile.get("appComposeSha256"), 32, "POLICY_INVALID")
+        measurements = profile.get("measurements")
+        require(isinstance(measurements, dict) and set(measurements) == set(MEASUREMENTS),
+                "POLICY_INVALID")
+        for key, size in MEASUREMENTS.items():
+            hex_bytes(measurements[key], size, "POLICY_INVALID")
+    facts = await inspect_gateway_report(document)
+    require(any(facts["appComposeSha256"] == profile["appComposeSha256"].lower()
+                and facts["measurements"] == {key: value.lower() for key, value in profile["measurements"].items()}
+                for profile in profiles), "GATEWAY_POLICY_MISMATCH")
+    reference = "0x" + digest(canonical({"quoteSha256": facts["quoteSha256"],
+                                     "nonce": document["nonce"].lower(),
+                                     "tlsSpkiSha256": facts["tlsSpkiSha256"],
+                                     "policyVersion": policy["version"]}))
+    return {"ok": True, "signingAddress": facts["signingAddress"],
+            "tlsSpkiSha256": facts["tlsSpkiSha256"], "attestationRef": reference,
+            "verifiedAt": iso(now), "expiresAt": iso(min(end, now + session)),
+            "policyVersion": policy["version"]}
+
+
 def http_json(method, url, payload=None):
     # No caller-controlled URLs, proxy environment, netrc credentials, or redirects.
     try:
@@ -258,6 +360,9 @@ async def inspect_evidence(document):
     main_result, cm_result = await asyncio.gather(verify_tdx(a.get("intel_quote")), verify_tdx(cm.get("quote")))
     main, manager = cpu_claims(main_result), cpu_claims(cm_result)
     require(main["report_data"] == digest(signer + spki) + nonce.hex(), "CPU_BINDING_MISMATCH")
+    if "event_log" in a:
+        require(replay_rtmr3(a["event_log"]) == main["rt_mr3"],
+                "MODEL_EVENT_LOG_MISMATCH")
     require(main_result["ppid"] == cm_result["ppid"]
             and all(main[k] == manager[k] for k in MEASUREMENTS), "WORKLOAD_VM_MISMATCH")
     actions = cm.get("actions")
@@ -324,3 +429,42 @@ async def verify(document, policy):
             "composeManagerImage": facts["composeManagerImage"],
             "nvidiaEvidenceSha256": facts["nvidiaEvidenceSha256"],
             "nvidiaEvidence": facts["nvidiaEvidence"]}
+
+
+async def verify_cloud(document, policy):
+    """Verify the gateway and every advertised model candidate before inference."""
+    require(isinstance(document, dict), "INPUT_INVALID")
+    nonce = hex_bytes(document.get("nonce"), 32).hex()
+    gateway_spki = hex_bytes(document.get("tlsSpkiSha256"), 32).hex()
+    model = document.get("model")
+    require(isinstance(model, str) and model, "MODEL_INVALID")
+    report = document.get("attestation")
+    require(isinstance(report, dict), "INPUT_INVALID")
+    candidates = report.get("model_attestations")
+    require(isinstance(candidates, list) and 1 <= len(candidates) <= 32,
+            "MODEL_EVIDENCE_MISSING")
+    gateway = await verify_gateway({"nonce": nonce, "tlsSpkiSha256": gateway_spki,
+                                    "gateway_attestation": report.get("gateway_attestation")}, policy)
+    verified = []
+    for candidate in candidates:
+        require(isinstance(candidate, dict) and candidate.get("model_name") == model
+                and "event_log" in candidate, "MODEL_EVIDENCE_INVALID")
+        provider_spki = hex_bytes(candidate.get("tls_cert_fingerprint"), 32,
+                                  "MODEL_EVIDENCE_INVALID").hex()
+        verdict = await verify({"nonce": nonce, "tlsSpkiSha256": provider_spki,
+                                "attestation": candidate}, policy)
+        verified.append(verdict)
+    signers = [item["signingAddress"] for item in verified]
+    require(len(set(signers)) == len(signers), "MODEL_EVIDENCE_DUPLICATE")
+    expiry = min(timestamp(gateway["expiresAt"]),
+                 *(timestamp(item["expiresAt"]) for item in verified))
+    now = time.time()
+    require(expiry > now, "VERIFICATION_EXPIRED")
+    reference = "0x" + digest(canonical({"gatewayRef": gateway["attestationRef"],
+                                     "modelRefs": [item["attestationRef"] for item in verified],
+                                     "model": model}))
+    return {"ok": True, "signingAddress": signers[0], "allowedSigners": signers,
+            "gatewaySigningAddress": gateway["signingAddress"],
+            "tlsSpkiSha256": gateway_spki, "attestationRef": reference,
+            "verifiedAt": iso(now), "expiresAt": iso(expiry),
+            "policyVersion": policy["version"], "model": model}
