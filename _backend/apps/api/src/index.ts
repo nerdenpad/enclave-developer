@@ -22,7 +22,7 @@ const receiptAnchorer = new Queue("receipt-anchorer", { connection: { url: confi
 receiptAnchorer.on("error", (err) => { log.error({ err }, "receipt_queue_error"); });
 const gateway = await EnclaveGateway.boot(db, config, log, { receiptAnchorer });
 const reconciliation = startReconciliation(() => gateway.reconcilePayments(), (err) => log.error({ err }, "payment_reconciliation_failed"));
-const { stored } = await loadOrCreateCvmKeys();
+const { stored } = await loadOrCreateCvmKeys(config.ENCLAVE_CVM_PATH, { allowCreate: config.NODE_ENV !== "production" });
 const agentCallTimeout = config.INFERENCE_TIMEOUT_MS + 60_000;
 const agentRuntime = new AgentRuntime({
   store: new PostgresAgentRunStore(db), gateway,

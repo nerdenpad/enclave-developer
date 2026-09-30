@@ -2,11 +2,13 @@
 
 E1 status: **open**. Arc Mainnet contracts are deployed and the API supports authorized settlement; public browser checkout remains disabled. Hosted inference and a small real-USDC browser payment still need acceptance with strict verification. A GitHub push is source delivery, not deployment by itself.
 
+The selected inference route is experimental direct NEAR using the exact reviewed `<model-label>.completions.near.ai/v1` endpoint. Its experimental label remains visible on `/status`. The selected route must pass pinned provider policy, node CPU/GPU evidence, TLS/signer binding and exact signed transcript checks before acceptance; choosing it does not mark E1 live.
+
 ## Available now
 
 - `/dashboard`: encrypted requests, explicit development payment confirmation, signed receipts and persisted owner history.
 - `/verify`: import a single exported receipt, check its EIP-712 signature locally, then optionally check contract acceptance, model policy binding and the anchor event through an explicitly selected RPC.
-- `/status`: public network, model, gateway policy, signer, verifier, configured token, price and inference limits. No API key is needed.
+- `/status`: public inference route, reported release stage/readiness, network, model, gateway/provider policy, signer, verifier, configured token, price and inference limits. No API key is needed.
 - NEAR managed inference with remote CPU/GPU evidence verification. Hosted-path acceptance remains separate.
 
 ## Acceptance matrix
@@ -14,23 +16,23 @@ E1 status: **open**. Arc Mainnet contracts are deployed and the API supports aut
 | Requirement | Current evidence | Remaining work before release |
 | --- | --- | --- |
 | Public HTTPS prompt flow | Hosted pilot, HTTPS and a separate non-admin pilot API key; local browser tests | Production user authentication and acceptance on the final infrastructure |
-| Verified NEAR GPU inference | Remote CPU/GPU verification is implemented | Complete a fresh hosted request through the supported NEAR Gateway path and verify its evidence independently |
+| Verified NEAR GPU inference | Remote CPU/GPU verification is implemented for experimental direct and Cloud Gateway routes | Complete a fresh hosted request through the selected exact direct endpoint; independently replay its pinned node policy, hardware evidence and signed request/response transcript |
 | Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the configured signer and request path on the accepted deployment |
 | On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI; Arc Mainnet contracts deployed | Confirm policy bindings, signer, anchoring and confirmations on Arc |
 | USDC without duplicate charge/execution | Arc contracts deployed; API `authorized` on `5042`; relay funded; browser checkout flag still false | One accepted small real-USDC browser payment with restart/recovery evidence; then enable the public checkout flag |
 | Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
-| Production mode | The process still rejects `NODE_ENV=production` | Implement and validate the selected NEAR-backed release profile before changing the guard or label |
+| Production mode | Managed NEAR + Arc release profile with exact route, manifest, pinned policy, signer, archived node/transcript verification and on-chain admission guards | Complete hosted acceptance and provide the reviewed release manifest before enabling the production deployment |
 | Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |
 
 ## Infrastructure inputs
 
-The operator must provide the final hosting configuration, production RPC capacity and confirmation policy, approved payment price, funded wallet roles, and a tested website authentication model. Public network parameters and read-only preflight are described in [Arc deployment](arc-deployment.md).
+The operator must provide the final hosting configuration, production RPC capacity and confirmation policy, approved payment price, funded wallet roles, and acceptance of the implemented wallet authentication. Public network parameters and read-only preflight are described in [Arc deployment](arc-deployment.md). The release configuration and acceptance archive are described in [NEAR + Arc release profile](near-arc-release.md).
 
 Do not put provider keys, deployer keys, RPC credentials or deployment profiles in Git. Existing `.env*.example` files are templates only.
 
 ## Deployment sequence
 
-1. Complete one hosted inference with strict provider evidence checks enabled and verify the receipt independently.
+1. Configure `NEAR_ENDPOINT_PROFILE=direct-experimental` and the exact canonical model endpoint. Complete one hosted inference with strict provider/node evidence checks enabled, preserve the exact signed transcript and policy bytes, and verify the receipt and provider evidence independently.
 2. Confirm the approved model, code, policy and signer on Arc. Verify token, domain and relay routing rules; never use local bootstrap approval on an external network.
 3. Configure the site and `/api` on one HTTPS origin with user authentication, request limits and persistent databases.
 4. Exercise a small, approved paid request; verify its receipt and anchor; restart during uncertain payment/inference states and confirm no second debit or generation.

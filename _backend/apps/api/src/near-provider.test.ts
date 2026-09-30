@@ -318,6 +318,22 @@ describe("NEAR transport trust boundaries", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("permits exactly the direct node signer when the verifier includes a signer set", async () => {
+    await writeFile(policyPath, JSON.stringify({ verdict: { allowedSigners: [signingAddress] } }));
+    const verified = await session();
+    expect(verified.allowedSigners).toEqual([signingAddress]);
+    expect(JSON.parse(verified.attestationProof!).report.signing_address).toBe(signingAddress);
+  });
+
+  it.each([
+    [`0x${"22".repeat(20)}`], [signingAddress, `0x${"22".repeat(20)}`], [signingAddress, signingAddress], [`0x${"00".repeat(20)}`],
+  ])("rejects a direct verifier signer set that is not the single attested node %#", async (...allowedSigners) => {
+    await writeFile(policyPath, JSON.stringify({ verdict: { allowedSigners } }));
+    await expect(session()).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe("GET");
+  });
+
   it("refuses a session that has expired before a later request", async () => {
     const verified = await session();
     vi.spyOn(Date, "now").mockReturnValue(Date.parse(verified.expiresAt) + 1);
@@ -359,7 +375,26 @@ describe("isolated hardware verifier process protocol", () => {
     expect(String(error)).not.toContain("private-invalid-output");
   });
 
-  it.each([{ ok: false }, { signingAddress: "invalid" }, { attestationRef: "invalid" }, { verifiedAt: "invalid" }])("rejects malformed verdict schema %#", async (verdict) => {
+  it.each([{ cloud: true, flag: "--cloud-archive" }, { cloud: false, flag: "--direct-archive" }])(
+    "uses only the explicit $flag archive entry point with the pinned policy", async ({ cloud, flag }) => {
+      await writeFile(policyPath, JSON.stringify({ verdict: { archivedHardwareVerified: true } }));
+      const policySha256 = `0x${"ab".repeat(32)}`;
+      const input = { ...publicInput(), archivedVerdict: { fixture: "public historical evidence" } };
+      const verdict = await runNearVerifier({ ...runtime(), policySha256 }, input, AbortSignal.timeout(5_000), cloud, true);
+      expect(verdict.archivedHardwareVerified).toBe(true);
+      expect(vi.mocked(childProcess.spawn).mock.calls[0]![1]).toEqual([verifierPath, "--policy", policyPath, "--policy-sha256", policySha256, flag]);
+      expect(calls).toHaveLength(0);
+    });
+
+  it.each([true, false])("refuses archive replay without an independent verified flag for cloud=%s", async (cloud) => {
+    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000), cloud, true)).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    await writeFile(policyPath, JSON.stringify({ verdict: { archivedHardwareVerified: false } }));
+    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000), cloud, true)).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([{ ok: false }, { signingAddress: "invalid" }, { signingAddress: `0x${"00".repeat(20)}` },
+    { attestationRef: "invalid" }, { verifiedAt: "invalid" }])("rejects malformed verdict schema %#", async (verdict) => {
     await writeFile(policyPath, JSON.stringify({ verdict }));
     await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000))).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
   });

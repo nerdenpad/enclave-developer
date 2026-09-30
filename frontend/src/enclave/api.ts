@@ -14,13 +14,26 @@ const MAX_RESPONSE_BYTES = 8 * MAX_BYTES;
 
 export const HealthSchema = z.object({
   ok: z.literal(true), service: z.string(), teeMode: z.string(), inferenceBackend: z.string(),
+  inferenceRoute: z.enum(["near-direct-experimental", "near-cloud-gateway", "development"]).optional(),
   chainId: z.number().int().positive().safe(), paymentMode: z.enum(["mock", "authorized"]),
   servingModel: z.object({ id: z.string(), name: z.string(), modelHash: hex32, codeHash: hex32 }),
   receiptSigner: address, verifierAddress: address, agentRuntimeEnabled: z.boolean(),
   inferencePriceUsdc: z.number().finite().nonnegative(),
-  deployment: z.object({ stage: z.literal("development"), productionReady: z.literal(false), gatewayKeyCustody: z.literal("software") }).optional(),
+  deployment: z.object({
+    stage: z.enum(["development", "pilot", "production"]), productionReady: z.boolean(), gatewayKeyCustody: z.literal("software"),
+    inferenceTrust: z.enum(["development", "near-cpu-gpu"]).optional(), releaseProfile: z.enum(["development", "near-arc"]).optional(),
+  }).optional(),
+  providerPolicy: z.object({ sha256: z.string().regex(/^0x[0-9a-f]{64}$/), expiresAt: date }).optional(),
   limits: z.object({ inferenceTimeoutMs: z.number().int().positive().safe(), maxOutputTokens: z.number().int().positive().nullable() }).optional(),
   settlementToken: address.optional(),
+}).superRefine((health, context) => {
+  const deployment = health.deployment;
+  if (deployment?.stage !== "production" && !deployment?.productionReady) return;
+  if (deployment?.stage !== "production" || !deployment.productionReady || deployment.releaseProfile !== "near-arc"
+    || deployment.inferenceTrust !== "near-cpu-gpu" || health.teeMode !== "managed-near" || health.inferenceBackend !== "near-verified"
+    || health.chainId !== 5042 || health.paymentMode !== "authorized" || !health.providerPolicy || health.inferenceRoute === "development") {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["deployment"], message: "Production status requires the managed NEAR and Arc release profile" });
+  }
 });
 export type Health = z.infer<typeof HealthSchema>;
 const QuoteSchema = z.object({

@@ -39,3 +39,6 @@ export { hashViewSecret, viewSecretMatches, publicReceiptView, publicReceiptLeak
 export { type ModelListingState, modelServingAllowed, listingBpsValid } from "./registry.js";
 export { BUYBACK_OF_TREASURY_BPS, buybackFromTreasury } from "./buyback.js";
 export { nextTcbVersion, tcbPolicyRecord, canonicalTcbPolicy, parseTcbPolicy, tcbPolicyHash } from "./tcb.js";
+export { productionReleaseManifestSchema, productionProviderPolicySchema, productionInferenceArchiveSchema,
+  ProductionReleaseError, validateProductionProviderPolicy, validateProductionRelease,
+  type ProductionReleaseManifest, type ProductionProviderPolicy } from "./release-manifest.js";

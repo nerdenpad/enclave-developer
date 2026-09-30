@@ -22,4 +22,11 @@ describe("development CVM key persistence", () => {
     await expect(loadOrCreateCvmKeys(target)).rejects.toThrow();
     expect(await readFile(target, "utf8")).toBe(raw);
   });
+  it("refuses to generate a replacement production identity when persistent keys are missing", async () => {
+    const target = await file();
+    await expect(loadOrCreateCvmKeys(target, { allowCreate: false })).rejects.toThrow("cannot generate replacement keys");
+    await expect(readFile(target, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    const provisioned = await loadOrCreateCvmKeys(target);
+    expect(await loadOrCreateCvmKeys(target, { allowCreate: false })).toEqual(provisioned);
+  });
 });

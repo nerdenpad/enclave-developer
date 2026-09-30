@@ -56,7 +56,7 @@ test("status is public, shows configuration and never labels the pilot live", as
       deployment: { stage: "development", productionReady: false, gatewayKeyCustody: "software" }, limits: { inferenceTimeoutMs: 300000, maxOutputTokens: 96 }, settlementToken: verifier,
     } : { active: { version: 2, servingImageId: "image", measurement: h("03"), policyHash: h("08"), status: "active", binding: "onchain", scope: "local", trustMode: "development-software", activatedAt: null, createdAt: "2026-09-22T00:00:00Z" }, history: [] } });
   });
-  await page.goto("/status"); await expect(page.getByText("DEVELOPMENT · E1 NOT RELEASED")).toBeVisible();
+  await page.goto("/status"); await expect(page.getByText("DEVELOPMENT · PRODUCTION NOT READY")).toBeVisible();
   await expect(page.getByLabel("Deployment details")).toContainText("Local Anvil"); await expect(page.getByLabel("Deployment details")).toContainText("96");
   expect(headers.length).toBeGreaterThanOrEqual(2); expect(headers.every(h => !h["x-api-key"])).toBe(true);
 });

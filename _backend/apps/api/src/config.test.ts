@@ -14,6 +14,7 @@ describe("loadConfig", () => {
     const cfg = loadConfig({ DATABASE_URL: "postgres://enclave:enclave@127.0.0.1:5433/enclave" });
     expect(cfg.API_PORT).toBe(8787);
     expect(cfg.TEE_MODE).toBe("dev");
+    expect(cfg.NEAR_ENDPOINT_PROFILE).toBe("cloud");
     expect(cfg.INFERENCE_ALLOW_REMOTE).toBe(false);
     expect(cfg.INFERENCE_API_KEY).toBeUndefined();
     expect(cfg.INFERENCE_HEALTH_PATH).toBeUndefined();
@@ -169,5 +170,59 @@ describe("agent runtime opt-in", () => {
     { AGENT_RUNTIME_MAX_DURATION_MS: "999" }, { AGENT_RUNTIME_MAX_DURATION_MS: "86400001" },
   ])("rejects unsafe job limits %#", (change) => {
     expect(() => loadConfig({ ...base, ...change })).toThrow("Invalid env");
+  });
+});
+
+describe("managed NEAR production profile", () => {
+  const settings = {
+    DATABASE_URL: "postgres://unit.invalid/db", NODE_ENV: "production", TEE_MODE: "managed-near", INFERENCE_BACKEND: "near-verified",
+    INFERENCE_BASE_URL: "https://cloud-api.near.ai/v1", INFERENCE_MODEL: "z-ai/glm-5.3-flash", INFERENCE_API_KEY: "unit-provider-token",
+    INFERENCE_ALLOW_REMOTE: "true", NEAR_VERIFIER_PYTHON: "python", NEAR_ATTESTATION_POLICY: "/reviewed/provider-policy.json",
+    NEAR_ATTESTATION_POLICY_SHA256: `0x${"ab".repeat(32)}`, PRODUCTION_RELEASE_MANIFEST: "/accepted/release.json",
+    ENCLAVE_CVM_PATH: process.platform === "win32" ? "C:\\accepted\\gateway.json" : "/accepted/gateway.json",
+    WALLET_AUTH_ORIGIN: "https://enclaveagent.tech", ARC_CHAIN_ID: "5042", ARC_RPC_URL: "https://rpc.mainnet.arc.io",
+    PAYMENT_MODE: "authorized", CHAIN_CONFIRMATIONS: "12", USDC_ADDRESS: "0x3600000000000000000000000000000000000000",
+    USDC_EIP712_NAME: "USDC", USDC_EIP712_VERSION: "2", SERVING_IMAGE_ID: "reviewed-near-release-v2", TCB_POLICY_VERSION: "2",
+    // This deterministic key is used only to exercise configuration parsing, with no RPC calls.
+    DEPLOYER_PRIVATE_KEY: `0x${"12".repeat(32)}`,
+    ATTESTATION_VERIFIER_ADDRESS: `0x${"21".repeat(20)}`, MODEL_REGISTRY_ADDRESS: `0x${"22".repeat(20)}`,
+    USAGE_METER_ADDRESS: `0x${"23".repeat(20)}`, FEE_VAULT_ADDRESS: `0x${"24".repeat(20)}`,
+    ENCL_TOKEN_ADDRESS: `0x${"25".repeat(20)}`, INSURANCE_STAKING_ADDRESS: `0x${"26".repeat(20)}`, AGENT_MANDATE_ADDRESS: `0x${"27".repeat(20)}`,
+  };
+  it("accepts complete configuration while deferring actual release/evidence acceptance to boot", () => {
+    expect(loadConfig(settings)).toMatchObject({ NODE_ENV: "production", TEE_MODE: "managed-near", PAYMENT_MODE: "authorized", ARC_CHAIN_ID: 5042 });
+  });
+  it.each([
+    { TEE_MODE: "dev" }, { INFERENCE_BACKEND: "echo" }, { INFERENCE_BACKEND: "openai-compatible" },
+    { INFERENCE_BASE_URL: "https://test.completions.near.ai/v1" }, { ARC_CHAIN_ID: "5042002" }, { PAYMENT_MODE: "mock" },
+    { WALLET_AUTH_ORIGIN: undefined }, { PRODUCTION_RELEASE_MANIFEST: undefined }, { NEAR_ATTESTATION_POLICY_SHA256: undefined },
+    { ENCLAVE_CVM_PATH: undefined }, { ENCLAVE_CVM_PATH: "relative.json" }, { CHAIN_CONFIRMATIONS: undefined }, { CHAIN_CONFIRMATIONS: "0" },
+    { USDC_EIP712_NAME: "USD Coin" }, { USDC_EIP712_VERSION: "1" }, { ARC_RPC_URL: "http://rpc.mainnet.arc.io" },
+    { MODEL_REGISTRY_ADDRESS: "0x0000000000000000000000000000000000000007" }, { INFERENCE_MODEL: "echo" },
+    { SERVING_IMAGE_ID: "enclave-echo-v1" }, { ALLOW_LOCAL_BOOTSTRAP: "true" },
+  ])("rejects incomplete or downgraded production settings %#", (change) => {
+    expect(() => loadConfig({ ...settings, ...change })).toThrow();
+  });
+  it("supports managed pilot sessions but never allows an unverified fallback", () => {
+    expect(loadConfig({ ...settings, NODE_ENV: "development" }).TEE_MODE).toBe("managed-near");
+    expect(() => loadConfig({ ...settings, NODE_ENV: "development", INFERENCE_BACKEND: "echo" })).toThrow("without a fallback");
+  });
+  it("accepts a verified experimental direct production endpoint only with its explicit profile", () => {
+    const direct = { ...settings, NEAR_ENDPOINT_PROFILE: "direct-experimental", INFERENCE_BASE_URL: "https://test.completions.near.ai/v1" };
+    expect(loadConfig(direct)).toMatchObject({ NODE_ENV: "production", TEE_MODE: "managed-near", NEAR_ENDPOINT_PROFILE: "direct-experimental",
+      INFERENCE_BACKEND: "near-verified", INFERENCE_BASE_URL: direct.INFERENCE_BASE_URL, PAYMENT_MODE: "authorized" });
+    expect(() => loadConfig({ ...direct, NEAR_ENDPOINT_PROFILE: undefined })).toThrow("explicit NEAR profile");
+    expect(() => loadConfig({ ...direct, NEAR_ENDPOINT_PROFILE: "cloud" })).toThrow("explicit NEAR profile");
+  });
+  it.each([
+    { INFERENCE_BASE_URL: "https://cloud-api.near.ai/v1" }, { INFERENCE_BASE_URL: "https://other.example/v1" },
+    { INFERENCE_BASE_URL: "https://test.completions.near.ai.evil.example/v1" }, { INFERENCE_BASE_URL: "http://test.completions.near.ai/v1" },
+    { INFERENCE_BASE_URL: "https://test.completions.near.ai/v1/" }, { INFERENCE_BASE_URL: "https://test.completions.near.ai" },
+    { INFERENCE_BASE_URL: "https://test.completions.near.ai:8443/v1" }, { INFERENCE_BASE_URL: "https://test.completions.near.ai/v1?token=ignored" },
+    { INFERENCE_BACKEND: "echo" }, { TEE_MODE: "dev" }, { NEAR_ENDPOINT_PROFILE: "direct" },
+    { NEAR_ATTESTATION_POLICY_SHA256: undefined }, { PRODUCTION_RELEASE_MANIFEST: undefined }, { NEAR_VERIFIER_PYTHON: undefined },
+    { NEAR_ATTESTATION_POLICY: undefined }, { PAYMENT_MODE: "mock" }, { ALLOW_LOCAL_BOOTSTRAP: "true" }, { INFERENCE_ALLOW_REMOTE: "false" },
+  ])("rejects an unsafe or incomplete experimental direct production profile %#", (change) => {
+    expect(() => loadConfig({ ...settings, NEAR_ENDPOINT_PROFILE: "direct-experimental", INFERENCE_BASE_URL: "https://test.completions.near.ai/v1", ...change })).toThrow();
   });
 });

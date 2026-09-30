@@ -1,7 +1,7 @@
 # NEAR hardware evidence verifier
 
-This subprocess verifies NEAR's current direct-model ECDSA + TLS SPKI report
-format before the API sends a prompt. It does not call inference, load `.env`
+This subprocess verifies NEAR's direct-model and Cloud Gateway ECDSA + TLS SPKI
+report formats before the API sends a prompt. It does not call inference, load `.env`
 files, access API keys, deploy workloads, or trust an upstream `PASS` string.
 
 ## Install and test
@@ -77,8 +77,77 @@ Preserve the exact input, loaded policy, and signed NVIDIA bundle alongside the
 verdict. A second NRAS request creates different signed tokens and cannot
 reconstruct the original reference. To recheck historical evidence, obtain the
 NVIDIA verification key from an independently trusted NVIDIA source; an included
-JWK is not a trust anchor. Current CLI verification intentionally uses fresh
-collateral and a fresh NRAS response, not caller-supplied historical tokens.
+JWK is not a trust anchor. Live CLI modes use fresh collateral and a fresh NRAS
+response. They never consume caller-supplied historical NVIDIA tokens.
+
+### Cloud archive replay
+
+Live Cloud verification uses `--cloud` and preserves the complete returned
+`gatewayVerdict` and ordered `modelVerdicts` alongside its top-level verdict.
+Every model verdict includes the exact signed `nvidiaEvidence` bundle and its
+digest. Keep these fields, the original report, nonce, measured TLS SPKI, and
+exact loaded policy in the encrypted transcript. Older archives without these
+fields cannot pass hardware replay. Saving a verdict does not approve a policy.
+
+Use the separate `--cloud-archive` mode to verify those saved hardware facts:
+
+```powershell
+python infra/near/verify.py --cloud-archive --policy <reviewed-policy.json> --policy-sha256 <0x-prefixed-SHA256-of-exact-policy-file>
+```
+
+Stdin is one document containing `nonce`, `tlsSpkiSha256`, `model`, the original
+Cloud `attestation` report, and its complete `archivedVerdict`. The optional
+`--policy-sha256` argument is available to every mode and rejects changed policy
+bytes before verification; production acceptance supplies the operator-reviewed
+digest. The policy must authorize each complete historical workload and remain
+valid at replay. Its exact contents must match the original policy commitment.
+Policy replacement or expiry cannot silently authorize an old archive.
+
+Archive mode verifies Intel quotes with current collateral and reconstructs the
+Gateway and model measurement, nonce, signer, SPKI, and workload bindings. It
+fetches verification keys only from NVIDIA's fixed, CA-verified NRAS JWKS URL.
+It performs no GPU attestation POST and never trusts an included JWK. Saved
+NVIDIA aggregate and device signatures, nonce, device-set binding, and security
+claims are verified at the saved model validation instant, bounded by the signed
+JWT timestamps and a maximum history of 30 days. All child and aggregate session
+times and expiries must be consistent. The saved clock value is not independently
+authenticated by the hardware quotes: the caller must also compare it with the
+signed provider evidence and trusted acceptance record.
+
+Using the saved signed bundles allows the verifier to reconstruct the original
+model and Cloud attestation references without issuing new NVIDIA tokens. It
+rejects altered references, signers, policy commitments, or verdict fields.
+Success returns the historical `verifiedAt` and `expiresAt`, plus
+`archivedHardwareVerified: true` and the current `replayedAt`. Historical session
+expiry is expected; this result never creates a live TLS session or authorizes a
+new prompt. `--cloud` rejects an `archivedVerdict` input. New inference always
+uses live verification and a fresh nonce before transmitting its prompt.
+
+### Direct-model archive replay
+
+The experimental direct endpoint path preserves the complete ordinary direct
+verdict, including its exact `nvidiaEvidence` bundle, alongside the original
+single model report. It uses the same complete measured model policy and
+operator-reviewed policy digest. Gateway profiles are required for Cloud
+verification; a direct-model policy does not need them.
+
+Use `--direct-archive` with `--policy` and the pinned `--policy-sha256` to replay
+that format. Stdin contains `nonce`, `tlsSpkiSha256`, the original direct
+`attestation` report, and its `archivedVerdict`. The verifier reconstructs exactly
+the original direct input, verifies both Intel quotes and measured runtime action
+bindings, obtains keys from the fixed NVIDIA JWKS URL, and verifies the saved
+NVIDIA bundle at its bounded historical instant. It performs no replacement GPU
+attestation POST. Current and historical policy validity, the 30-day history
+limit, exact original reference, signer, and session expiry remain required.
+
+The direct verdict identifies one `signingAddress`; its report's `model_name`
+identifies the workload. It has no Cloud `gatewayVerdict`, `modelVerdicts`, or
+`allowedSigners` array. Successful replay adds `archivedHardwareVerified: true`
+and `replayedAt` while preserving the historical session times. Live direct
+verification rejects `archivedVerdict`, and direct archive mode rejects Cloud
+report wrappers. Archive replay does not turn an expired session into permission
+to send a new prompt. New direct inference still requires a fresh nonce, live
+hardware verification, and the actual CA-verified socket SPKI before transmission.
 
 ## What is checked
 

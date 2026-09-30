@@ -217,9 +217,7 @@ async def inspect_gateway_report(document):
             "appComposeSha256": app_hash, "quoteSha256": digest(bytes.fromhex(gateway["intel_quote"]))}
 
 
-async def verify_gateway(document, policy):
-    """Authorize an independently verified gateway against one reviewed measurement profile."""
-    now = time.time()
+def validate_gateway_policy(policy, now):
     require(isinstance(policy, dict) and policy.get("schemaVersion") == 1, "POLICY_INVALID")
     require(isinstance(policy.get("version"), str) and 1 <= len(policy["version"]) <= 128,
             "POLICY_INVALID")
@@ -237,7 +235,11 @@ async def verify_gateway(document, policy):
                 "POLICY_INVALID")
         for key, size in MEASUREMENTS.items():
             hex_bytes(measurements[key], size, "POLICY_INVALID")
-    facts = await inspect_gateway_report(document)
+    return end, session, profiles
+
+
+def gateway_verdict(document, policy, facts, now):
+    end, session, profiles = validate_gateway_policy(policy, now)
     require(any(facts["appComposeSha256"] == profile["appComposeSha256"].lower()
                 and facts["measurements"] == {key: value.lower() for key, value in profile["measurements"].items()}
                 for profile in profiles), "GATEWAY_POLICY_MISMATCH")
@@ -249,6 +251,14 @@ async def verify_gateway(document, policy):
             "tlsSpkiSha256": facts["tlsSpkiSha256"], "attestationRef": reference,
             "verifiedAt": iso(now), "expiresAt": iso(min(end, now + session)),
             "policyVersion": policy["version"]}
+
+
+async def verify_gateway(document, policy):
+    """Authorize an independently verified gateway against one reviewed measurement profile."""
+    now = time.time()
+    validate_gateway_policy(policy, now)
+    facts = await inspect_gateway_report(document)
+    return gateway_verdict(document, policy, facts, now)
 
 
 def http_json(method, url, payload=None):
@@ -341,7 +351,7 @@ def action_value(value):
     return False
 
 
-async def inspect_evidence(document):
+async def inspect_evidence(document, *, archived_bundle=None, verification_time=None, trusted_jwks=None):
     """Real crypto verification only; does NOT authorize a workload or return ok."""
     require(isinstance(document, dict), "INPUT_INVALID")
     nonce = hex_bytes(document.get("nonce"), 32)
@@ -391,10 +401,17 @@ async def inspect_evidence(document):
     for evidence in payload["evidence_list"]:
         require(isinstance(evidence, dict) and isinstance(evidence.get("evidence"), str)
                 and isinstance(evidence.get("certificate"), str), "NVIDIA_INVALID")
-    bundle, jwks = await asyncio.gather(
-        asyncio.to_thread(http_json, "POST", NRAS_ORIGIN + "/v3/attest/gpu", payload),
-        asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json"))
-    now = int(time.time())
+    if archived_bundle is None:
+        require(verification_time is None and trusted_jwks is None, "ARCHIVE_INVALID")
+        bundle, jwks = await asyncio.gather(
+            asyncio.to_thread(http_json, "POST", NRAS_ORIGIN + "/v3/attest/gpu", payload),
+            asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json"))
+        now = int(time.time())
+    else:
+        # Only the explicit archive entry point supplies these values. Never use
+        # caller-supplied JWKs or token URLs as a verification trust anchor.
+        require(type(verification_time) is int and isinstance(trusted_jwks, dict), "ARCHIVE_INVALID")
+        bundle, jwks, now = archived_bundle, trusted_jwks, verification_time
     gpu_models, nvidia_exp = verify_nvidia_tokens(bundle, jwks, nonce, len(payload["evidence_list"]), now)
     measurements = {key: main[key] for key in MEASUREMENTS}
     return {"signingAddress": address.lower(), "tlsSpkiSha256": spki.hex(),
@@ -406,13 +423,8 @@ async def inspect_evidence(document):
             "nvidiaEvidenceSha256": digest(canonical(bundle)), "nvidiaEvidence": bundle}
 
 
-async def verify(document, policy):
-    validate_policy(policy, time.time())
-    started = time.time()
-    facts = await inspect_evidence(document)
-    now = int(time.time())
+def model_verdict(document, policy, facts, now):
     end, session = validate_policy(policy, now)
-    require(now - started <= 120, "VERIFICATION_TIMEOUT")
     keys = ("model", "measurements", "appComposeSha256", "composeManagerActionsSha256", "composeManagerImage", "gpuCount", "gpuModels")
     require(any(all(facts[key] == profile[key] for key in keys) for profile in policy["profiles"]), "WORKLOAD_NOT_APPROVED")
     expiry = min(now + session, int(end), facts["nvidiaExpiresAt"])
@@ -431,9 +443,20 @@ async def verify(document, policy):
             "nvidiaEvidence": facts["nvidiaEvidence"]}
 
 
+async def verify(document, policy):
+    require(isinstance(document, dict) and "archivedVerdict" not in document, "INPUT_INVALID")
+    validate_policy(policy, time.time())
+    started = time.time()
+    facts = await inspect_evidence(document)
+    now = int(time.time())
+    require(now - started <= 120, "VERIFICATION_TIMEOUT")
+    return model_verdict(document, policy, facts, now)
+
+
 async def verify_cloud(document, policy):
     """Verify the gateway and every advertised model candidate before inference."""
     require(isinstance(document, dict), "INPUT_INVALID")
+    require("archivedVerdict" not in document, "INPUT_INVALID")
     nonce = hex_bytes(document.get("nonce"), 32).hex()
     gateway_spki = hex_bytes(document.get("tlsSpkiSha256"), 32).hex()
     model = document.get("model")
@@ -467,4 +490,119 @@ async def verify_cloud(document, policy):
             "gatewaySigningAddress": gateway["signingAddress"],
             "tlsSpkiSha256": gateway_spki, "attestationRef": reference,
             "verifiedAt": iso(now), "expiresAt": iso(expiry),
-            "policyVersion": policy["version"], "model": model}
+            "policyVersion": policy["version"], "model": model,
+            "gatewayVerdict": gateway, "modelVerdicts": verified}
+
+
+def archive_time(verdict, now):
+    require(isinstance(verdict, dict) and verdict.get("ok") is True, "ARCHIVE_INVALID")
+    try:
+        recorded = timestamp(verdict.get("verifiedAt"))
+        expiry = timestamp(verdict.get("expiresAt"))
+    except VerificationError as error:
+        raise VerificationError("ARCHIVE_TIME_INVALID") from error
+    require(recorded == int(recorded) and verdict["verifiedAt"] == iso(recorded)
+            and now - 30 * 86400 <= recorded <= now
+            and recorded < expiry <= recorded + 300, "ARCHIVE_TIME_INVALID")
+    return int(recorded)
+
+
+def compare_archived_verdict(archived, reconstructed):
+    require(isinstance(archived, dict)
+            and all(archived.get(key) == value for key, value in reconstructed.items()),
+            "ARCHIVE_VERDICT_MISMATCH")
+
+
+async def verify_direct_archive(document, policy):
+    """Replay a saved direct-model verdict without replacing its signed NVIDIA bundle."""
+    now = time.time()
+    validate_policy(policy, now)
+    require(isinstance(document, dict), "INPUT_INVALID")
+    nonce = hex_bytes(document.get("nonce"), 32).hex()
+    spki = hex_bytes(document.get("tlsSpkiSha256"), 32).hex()
+    report, archived = document.get("attestation"), document.get("archivedVerdict")
+    require(isinstance(report, dict) and isinstance(archived, dict)
+            and "gateway_attestation" not in report and "model_attestations" not in report,
+            "ARCHIVE_INVALID")
+    recorded = archive_time(archived, now)
+    require(isinstance(archived.get("nvidiaEvidence"), list), "ARCHIVE_INVALID")
+    # Keep exactly the normalized input used by the original direct live path.
+    # Including the archived verdict would change its policy/evidence reference.
+    original = {"nonce": nonce, "tlsSpkiSha256": spki, "attestation": report}
+    jwks = await asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json")
+    facts = await inspect_evidence(original, archived_bundle=archived["nvidiaEvidence"],
+                                   verification_time=recorded, trusted_jwks=jwks)
+    reconstructed = model_verdict(original, policy, facts, recorded)
+    compare_archived_verdict(archived, reconstructed)
+    validate_policy(policy, time.time())
+    return {**reconstructed, "archivedHardwareVerified": True, "replayedAt": iso(time.time())}
+
+
+async def verify_cloud_archive(document, policy):
+    """Replay saved Cloud evidence with current Intel collateral and trusted NVIDIA keys.
+
+    NVIDIA JWT signatures/nonce/claims are checked at the bounded historical
+    verification instant. This mode does not establish a new TLS session or
+    authorize live inference; live verification never consumes archived verdicts.
+    """
+    now = time.time()
+    validate_policy(policy, now)
+    validate_gateway_policy(policy, now)
+    require(isinstance(document, dict), "INPUT_INVALID")
+    nonce = hex_bytes(document.get("nonce"), 32).hex()
+    gateway_spki = hex_bytes(document.get("tlsSpkiSha256"), 32).hex()
+    model = document.get("model")
+    require(isinstance(model, str) and model, "MODEL_INVALID")
+    report, archived = document.get("attestation"), document.get("archivedVerdict")
+    require(isinstance(report, dict) and isinstance(archived, dict), "ARCHIVE_INVALID")
+    recorded = archive_time(archived, now)
+    candidates, model_archives = report.get("model_attestations"), archived.get("modelVerdicts")
+    require(isinstance(candidates, list) and 1 <= len(candidates) <= 32,
+            "MODEL_EVIDENCE_MISSING")
+    require(isinstance(model_archives, list) and len(model_archives) == len(candidates), "ARCHIVE_INVALID")
+    gateway_archive = archived.get("gatewayVerdict")
+    gateway_time = archive_time(gateway_archive, now)
+    require(gateway_time <= recorded < timestamp(gateway_archive["expiresAt"]), "ARCHIVE_TIME_INVALID")
+    gateway_input = {"nonce": nonce, "tlsSpkiSha256": gateway_spki,
+                     "gateway_attestation": report.get("gateway_attestation")}
+    gateway_facts = await inspect_gateway_report(gateway_input)
+    gateway = gateway_verdict(gateway_input, policy, gateway_facts, gateway_time)
+    compare_archived_verdict(gateway_archive, gateway)
+    # This key source is fixed, CA-verified, has no redirects/proxy/netrc, and
+    # rejects unknown key IDs. An archived/included JWK is never consulted.
+    jwks = await asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json")
+    verified = []
+    for candidate, model_archive in zip(candidates, model_archives, strict=True):
+        require(isinstance(candidate, dict) and candidate.get("model_name") == model
+                and "event_log" in candidate, "MODEL_EVIDENCE_INVALID")
+        model_time = archive_time(model_archive, now)
+        require(gateway_time <= model_time <= recorded < timestamp(model_archive["expiresAt"]),
+                "ARCHIVE_TIME_INVALID")
+        provider_spki = hex_bytes(candidate.get("tls_cert_fingerprint"), 32,
+                                  "MODEL_EVIDENCE_INVALID").hex()
+        model_input = {"nonce": nonce, "tlsSpkiSha256": provider_spki, "attestation": candidate}
+        require(isinstance(model_archive.get("nvidiaEvidence"), list), "ARCHIVE_INVALID")
+        facts = await inspect_evidence(model_input, archived_bundle=model_archive["nvidiaEvidence"],
+                                       verification_time=model_time, trusted_jwks=jwks)
+        verdict = model_verdict(model_input, policy, facts, model_time)
+        compare_archived_verdict(model_archive, verdict)
+        verified.append(verdict)
+    signers = [item["signingAddress"] for item in verified]
+    require(len(set(signers)) == len(signers), "MODEL_EVIDENCE_DUPLICATE")
+    expiry = min(timestamp(gateway["expiresAt"]),
+                 *(timestamp(item["expiresAt"]) for item in verified))
+    require(recorded < expiry, "ARCHIVE_TIME_INVALID")
+    reference = "0x" + digest(canonical({"gatewayRef": gateway["attestationRef"],
+                                     "modelRefs": [item["attestationRef"] for item in verified],
+                                     "model": model}))
+    reconstructed = {"ok": True, "signingAddress": signers[0], "allowedSigners": signers,
+                     "gatewaySigningAddress": gateway["signingAddress"],
+                     "tlsSpkiSha256": gateway_spki, "attestationRef": reference,
+                     "verifiedAt": iso(recorded), "expiresAt": iso(expiry),
+                     "policyVersion": policy["version"], "model": model,
+                     "gatewayVerdict": gateway, "modelVerdicts": verified}
+    compare_archived_verdict(archived, reconstructed)
+    # Reject policy expiry during long collateral checks as well as at admission.
+    validate_policy(policy, time.time())
+    validate_gateway_policy(policy, time.time())
+    return {**reconstructed, "archivedHardwareVerified": True, "replayedAt": iso(time.time())}

@@ -8,13 +8,15 @@ import { z } from "zod";
 import { AppError, sha256Hex } from "@enclave/core";
 import type { NearAttestationVerifier, NearVerifiedFetch } from "@enclave/core";
 
-export type NearProviderOptions = { pythonPath: string; policyPath: string; verifierPath?: string; apiKey?: string };
+export type NearProviderOptions = { pythonPath: string; policyPath: string; policySha256?: string; verifierPath?: string; apiKey?: string };
 const defaultVerifierPath = fileURLToPath(new URL("../../../infra/near/verify.py", import.meta.url));
 const hex32 = z.string().regex(/^(?:0x)?[0-9a-f]{64}$/i);
+const signerAddress = z.string().regex(/^0x[0-9a-f]{40}$/i).refine(value => !/^0x0{40}$/i.test(value));
 const verdictSchema = z.object({
-  ok: z.literal(true), signingAddress: z.string().regex(/^0x[0-9a-f]{40}$/i),
+  ok: z.literal(true), signingAddress: signerAddress,
   tlsSpkiSha256: hex32, attestationRef: hex32, verifiedAt: z.string().datetime(), expiresAt: z.string().datetime(),
-  allowedSigners: z.array(z.string().regex(/^0x[0-9a-f]{40}$/i)).min(1).max(32).optional(),
+  allowedSigners: z.array(signerAddress).min(1).max(32).optional(),
+  archivedHardwareVerified: z.boolean().optional(),
 }).passthrough();
 const normalizeHex = (value: string) => value.replace(/^0x/, "").toLowerCase();
 const unavailable = () => new AppError("INFERENCE_ATTESTATION_FAILED", "NEAR hardware attestation or transport verification failed", 503);
@@ -87,7 +89,7 @@ async function requestBytes(url: URL, init: RequestInit, agent: https.Agent, max
   });
 }
 
-export async function runNearVerifier(options: NearProviderOptions, input: unknown, signal: AbortSignal, cloud = false): Promise<z.infer<typeof verdictSchema>> {
+export async function runNearVerifier(options: NearProviderOptions, input: unknown, signal: AbortSignal, cloud = false, archive = false): Promise<z.infer<typeof verdictSchema>> {
   signal.throwIfAborted();
   const env: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
   // The verifier only receives public hardware evidence, never inference credentials.
@@ -96,7 +98,8 @@ export async function runNearVerifier(options: NearProviderOptions, input: unkno
   }
   return new Promise((resolve, reject) => {
     const child = spawn(options.pythonPath, [options.verifierPath ?? defaultVerifierPath, "--policy", options.policyPath,
-      ...(cloud ? ["--cloud"] : [])], {
+      ...(options.policySha256 === undefined ? [] : ["--policy-sha256", options.policySha256]),
+      ...(archive ? [cloud ? "--cloud-archive" : "--direct-archive"] : cloud ? ["--cloud"] : [])], {
       env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, signal,
     });
     const chunks: Buffer[] = [];
@@ -116,6 +119,7 @@ export async function runNearVerifier(options: NearProviderOptions, input: unkno
       if (code !== 0 || signal.aborted) { fail(); return; }
       try {
         const parsed = verdictSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        if (archive && parsed.archivedHardwareVerified !== true) { fail(); return; }
         settled = true;
         resolve(parsed);
       } catch { fail(); }
@@ -127,6 +131,7 @@ export async function runNearVerifier(options: NearProviderOptions, input: unkno
 /** A new nonce, policy read and hardware verification are required for every inference. */
 export function createNearAttestationVerifier(options: NearProviderOptions): NearAttestationVerifier {
   if (!options.pythonPath || !options.policyPath) throw new Error("NEAR verifier runtime and versioned policy are required");
+  if (options.policySha256 !== undefined && !/^0x[0-9a-f]{64}$/.test(options.policySha256)) throw new Error("NEAR policy fingerprint must be lowercase bytes32");
   return async ({ baseUrl, model, signal }) => {
     const base = nearBaseUrl(baseUrl);
     const cloud = base.hostname === "cloud-api.near.ai";
@@ -167,6 +172,8 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
       const now = Date.now();
       if (normalizeHex(verdict.tlsSpkiSha256) !== peerSpki
         || (!cloud && (typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase()))
+        || (!cloud && verdict.allowedSigners !== undefined && (verdict.allowedSigners.length !== 1
+          || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
         || (cloud && (!verdict.allowedSigners || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
         || Date.parse(verdict.verifiedAt) > now + 5_000 || Date.parse(verdict.verifiedAt) < now - 300_000
         || Date.parse(verdict.expiresAt) <= now || Date.parse(verdict.expiresAt) > Date.parse(verdict.verifiedAt) + 300_000
@@ -179,7 +186,7 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
         return wire.response;
       };
       const session = {
-        allowedSigners: (verdict.allowedSigners ?? [verdict.signingAddress]) as `0x${string}`[],
+        allowedSigners: (cloud ? verdict.allowedSigners! : [verdict.signingAddress]) as `0x${string}`[],
         attestationRef: `0x${normalizeHex(verdict.attestationRef)}` as `0x${string}`,
         verifiedAt: verdict.verifiedAt, expiresAt: verdict.expiresAt, tlsBound: true as const,
         fetch: pinnedFetch, close: () => bootstrapAgent.destroy(),

@@ -27,6 +27,8 @@
     "contracts:deploy-arc": "node scripts/deploy-arc.mjs",
     "registry:prepare:arc": "node scripts/prepare-arc-model-listing.mjs",
     "test:registry-preflight": "node --test scripts/prepare-arc-model-listing.test.mjs",
+    "check:production-release": "tsx scripts/check-production-release.ts",
+    "test:production-release": "vitest run scripts/check-production-release.test.ts",
     "typecheck": "tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/db/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/worker/tsconfig.json && npm run typecheck -w @enclave/agent-sdk",
     "test:integration": "tsx scripts/test-integration.ts",
     "test:contracts": "tsx scripts/contracts-test.ts",

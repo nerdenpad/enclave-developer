@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsolute } from "node:path";
 import { withRelayKey } from "@enclave/core/relay-key";
 import { createOpenAICompatibleInference, isConfiguredAddress } from "@enclave/core";
 import { nearBaseUrl } from "./near-provider.js";
@@ -32,7 +33,9 @@ const envSchema = z.object({
   SERVING_IMAGE_ID: z.string().default("enclave-echo-v1"),
   TCB_POLICY_VERSION: z.coerce.number().int().positive().default(1),
   INFERENCE_PRICE_USDC: z.coerce.number().positive().default(0.1),
-  TEE_MODE: z.enum(["dev"]).default("dev"),
+  TEE_MODE: z.enum(["dev", "managed-near"]).default("dev"),
+  PRODUCTION_RELEASE_MANIFEST: z.string().min(1).optional(),
+  ENCLAVE_CVM_PATH: z.string().min(1).optional(),
   PAYMENT_MODE: z.enum(["mock", "authorized"]).default("mock"),
   USDC_EIP712_NAME: z.string().min(1).default("USD Coin"),
   USDC_EIP712_VERSION: z.string().min(1).default("2"),
@@ -46,6 +49,8 @@ const envSchema = z.object({
   INFERENCE_TIMEOUT_MS: z.coerce.number().int().positive().max(300_000).default(30_000),
   NEAR_VERIFIER_PYTHON: z.string().min(1).optional(),
   NEAR_ATTESTATION_POLICY: z.string().min(1).optional(),
+  NEAR_ATTESTATION_POLICY_SHA256: z.string().regex(/^0x[0-9a-f]{64}$/).optional(),
+  NEAR_ENDPOINT_PROFILE: z.enum(["cloud", "direct-experimental"]).default("cloud"),
   NEAR_MAX_TOKENS: z.coerce.number().int().positive().max(4096).default(512),
   AGENT_RUNTIME_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   AGENT_RUNTIME_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(1000),
@@ -56,7 +61,36 @@ const envSchema = z.object({
   const priceUnits = Math.round(env.INFERENCE_PRICE_USDC * 1_000_000);
   if (!Number.isSafeInteger(priceUnits) || priceUnits <= 0) ctx.addIssue({ code: "custom", path: ["INFERENCE_PRICE_USDC"], message: "Price must be at least one USDC unit and fit safe integer units" });
   if (env.NODE_ENV === "production") {
-    ctx.addIssue({ code: "custom", path: ["TEE_MODE"], message: "Production requires a hardware TEE adapter; dev CVM is not supported" });
+    const requireSetting = (valid: boolean, field: string, message: string): void => {
+      if (!valid) ctx.addIssue({ code: "custom", path: [field], message });
+    };
+    requireSetting(env.TEE_MODE === "managed-near" && env.INFERENCE_BACKEND === "near-verified", "TEE_MODE", "Production requires the managed NEAR hardware TEE verification profile");
+    const productionEndpoint = env.NEAR_ENDPOINT_PROFILE === "direct-experimental"
+      ? /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.completions\.near\.ai\/v1$/.test(env.INFERENCE_BASE_URL)
+      : env.INFERENCE_BASE_URL === "https://cloud-api.near.ai/v1";
+    requireSetting(productionEndpoint, "INFERENCE_BASE_URL", "Production requires the endpoint selected by the explicit NEAR profile");
+    requireSetting(env.ARC_CHAIN_ID === 5042 && env.PAYMENT_MODE === "authorized", "PAYMENT_MODE", "Production requires authorized Arc Mainnet settlement");
+    requireSetting(!env.ALLOW_LOCAL_BOOTSTRAP, "ALLOW_LOCAL_BOOTSTRAP", "Production forbids local bootstrap");
+    requireSetting(Boolean(env.WALLET_AUTH_ORIGIN), "WALLET_AUTH_ORIGIN", "Production requires HTTPS wallet authentication");
+    requireSetting(Boolean(env.PRODUCTION_RELEASE_MANIFEST), "PRODUCTION_RELEASE_MANIFEST", "Production requires an independently reviewed acceptance manifest");
+    requireSetting(Boolean(env.ENCLAVE_CVM_PATH && isAbsolute(env.ENCLAVE_CVM_PATH)), "ENCLAVE_CVM_PATH", "Production requires an explicit persistent gateway key file");
+    requireSetting(Boolean(env.NEAR_ATTESTATION_POLICY_SHA256), "NEAR_ATTESTATION_POLICY_SHA256", "Production requires a pinned reviewed provider policy");
+    requireSetting(env.CHAIN_CONFIRMATIONS !== undefined && env.CHAIN_CONFIRMATIONS >= 1, "CHAIN_CONFIRMATIONS", "Production requires an explicit positive confirmation policy");
+    requireSetting(env.USDC_ADDRESS.toLowerCase() === "0x3600000000000000000000000000000000000000" && env.USDC_EIP712_NAME === "USDC" && env.USDC_EIP712_VERSION === "2", "USDC_ADDRESS", "Production requires the reviewed Arc USDC domain");
+    for (const field of ["ATTESTATION_VERIFIER_ADDRESS", "MODEL_REGISTRY_ADDRESS", "USAGE_METER_ADDRESS", "FEE_VAULT_ADDRESS", "ENCL_TOKEN_ADDRESS", "INSURANCE_STAKING_ADDRESS", "AGENT_MANDATE_ADDRESS"] as const) {
+      requireSetting(isConfiguredAddress(env[field]), field, "Production requires explicit deployed contract addresses");
+    }
+    try {
+      const rpc = new URL(env.ARC_RPC_URL);
+      requireSetting(rpc.protocol === "https:" && !rpc.username && !rpc.password && !rpc.hash, "ARC_RPC_URL", "Production requires an HTTPS RPC endpoint");
+    } catch { requireSetting(false, "ARC_RPC_URL", "Production requires an HTTPS RPC endpoint"); }
+    requireSetting(!/^(echo|enclave-echo-v1)$/.test(env.INFERENCE_MODEL) && env.SERVING_IMAGE_ID !== "enclave-echo-v1", "SERVING_IMAGE_ID", "Production forbids development serving identities");
+  }
+  if (env.TEE_MODE === "managed-near" && env.INFERENCE_BACKEND !== "near-verified") {
+    ctx.addIssue({ code: "custom", path: ["INFERENCE_BACKEND"], message: "Managed NEAR sessions require verified inference without a fallback" });
+  }
+  if (env.NEAR_ENDPOINT_PROFILE === "direct-experimental" && (env.TEE_MODE !== "managed-near" || env.INFERENCE_BACKEND !== "near-verified")) {
+    ctx.addIssue({ code: "custom", path: ["NEAR_ENDPOINT_PROFILE"], message: "The experimental direct profile requires managed NEAR hardware verification" });
   }
   if (env.ALLOW_LOCAL_BOOTSTRAP && ![31337, 1337].includes(env.ARC_CHAIN_ID)) ctx.addIssue({ code: "custom", path: ["ALLOW_LOCAL_BOOTSTRAP"], message: "Bootstrap is restricted to local chains" });
   if (env.AGENT_RUNTIME_ENABLED && env.PAYMENT_MODE === "mock" && (env.ARC_CHAIN_ID !== 31337 || !env.ALLOW_LOCAL_BOOTSTRAP)) {

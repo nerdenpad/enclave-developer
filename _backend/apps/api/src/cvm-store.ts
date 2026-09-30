@@ -15,7 +15,7 @@ export type StoredCvm = {
 const keySchema = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 const storedSchema = z.object({ vendorPrivateKey: keySchema, enclavePrivateKey: keySchema, wrappingKey: keySchema, modelKey: keySchema });
 
-export async function loadOrCreateCvmKeys(filePath = process.env.ENCLAVE_CVM_PATH ?? fileURLToPath(new URL("../../../data/cvm.json", import.meta.url))): Promise<{
+export async function loadOrCreateCvmKeys(filePath = process.env.ENCLAVE_CVM_PATH ?? fileURLToPath(new URL("../../../data/cvm.json", import.meta.url)), options: { allowCreate?: boolean } = {}): Promise<{
   stored: StoredCvm;
   vendor: VendorRoots;
 }> {
@@ -31,6 +31,7 @@ export async function loadOrCreateCvmKeys(filePath = process.env.ENCLAVE_CVM_PAT
   } catch (err) {
     // Never rotate stored keys after corruption, invalid data or access errors.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if (options.allowCreate === false) throw new Error("Accepted gateway keys are missing; production cannot generate replacement keys");
     const vendorPrivateKey = generatePrivateKey();
     const stored: StoredCvm = {
       vendorPrivateKey,
@@ -43,7 +44,7 @@ export async function loadOrCreateCvmKeys(filePath = process.env.ENCLAVE_CVM_PAT
       await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      return loadOrCreateCvmKeys(filePath);
+      return loadOrCreateCvmKeys(filePath, options);
     }
     const vendor: VendorRoots = {
       privateKey: stored.vendorPrivateKey,
