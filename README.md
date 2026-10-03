@@ -14,10 +14,11 @@ verification and payment status are checked separately on the
 
 > ### Release status
 >
-> NEAR + Arc production inference is deployed with CPU/GPU evidence checks and
-> signed receipts. Public checkout is enabled at **0.10 USDC per request**.
-> Manual wallet acceptance: passed, confirmed by the project owner on 3 October 2026.
-> Remaining live failure acceptance keeps the full E1 launch open.
+> The backend runs in production mode with a historically accepted NEAR + Arc
+> release manifest. New payment/inference admission is blocked pending review
+> of the current provider workload. The approved price is **0.10 USDC per request**.
+> Web QA fixes were deployed on 3 October 2026. Manual wallet acceptance is
+> reopened; a real OKX retest and the remaining E1 acceptance are still open.
 > See [deployment status](https://enclaveagent.tech/status),
 > [acceptance evidence](docs/release-progress.md) and
 > [remaining E1 checks](docs/e1-release.md).

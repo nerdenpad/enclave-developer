@@ -44,10 +44,11 @@ export function WalletConnectControl() {
     setTarget(document.getElementById("wallet-connect-root"));
     const restoreAbort = new AbortController(); restoration.current = restoreAbort;
     const current = revision.current;
-    void restoreWallet(restoreAbort.signal, value => {
+    void restoreWallet(restoreAbort.signal, (value, reason = "connection") => {
       if (!alive.current || current !== revision.current) return;
-      setAccount(value); walletChanged();
-      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null); }
+      setAccount(value);
+      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null, true, reason); setNotice("Wallet session is unavailable. Connect again to continue."); }
+      else walletChanged(reason);
     }).then(result => {
       if (!result) return;
       if (!alive.current || current !== revision.current) { result.detach?.(); return; }
@@ -111,11 +112,11 @@ export function WalletConnectControl() {
     setBusy(true); setError(""); setNotice("");
     const browser = wallet && "provider" in wallet ? wallet : null;
     setSelected(wallet && !browser ? wallet as ListedWallet : null);
-    const changed = (value: WalletAccount | null) => {
+    const changed = (value: WalletAccount | null, reason: "connection" | "identity" = "connection") => {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
-      walletChanged();
-      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null); setNotice("Wallet disconnected. Connect again to continue."); }
+      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null, true, reason); setNotice("Wallet disconnected. Connect again to continue."); }
+      else walletChanged(reason);
     };
     try {
       const result = browser ? await connectBrowserWallet(browser, controller.signal, changed)
@@ -139,7 +140,7 @@ export function WalletConnectControl() {
     void logoutWallet("").catch(() => {});
     revision.current++; attempt.current?.abort();
     const previous = connection.current; connection.current = null;
-    setPaymentWallet(null);
+    setPaymentWallet(null, true, "disconnect");
     setAccount(null); setBusy(false);
     setNotice("Wallet disconnected from Enclave.");
     try { await previous?.disconnect(); }

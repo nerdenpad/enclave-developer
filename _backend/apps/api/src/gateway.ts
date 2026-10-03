@@ -142,6 +142,8 @@ export class EnclaveGateway {
   private tcbLifecycle: TcbLifecycle | undefined;
   private acceptedRelease: AcceptedRelease | undefined;
   private runtimeContractReady = true;
+  private providerAdmissionReady = false;
+  private providerPreflightAttempt = 0;
   constructor(
     private readonly db: Database,
     private cvm: DevCvm,
@@ -192,7 +194,14 @@ export class EnclaveGateway {
     await gateway.syncTcb();
     if (config.NODE_ENV === "production") {
       await verifyAcceptedProviderEvidence(config, acceptedRelease!);
-      await gateway.providerPreflight();
+      try { await gateway.providerPreflight(); }
+      catch (error) {
+        // Keep status, sign-in and stored history available during a provider
+        // rejection. Every new payment and inference still checks fresh evidence.
+        // Invalid releases, archived evidence, keys and chain wiring fail boot.
+        if (!(error instanceof AppError) || !["INFERENCE_ATTESTATION_FAILED", "NEAR_VERIFICATION_FAILED"].includes(error.code)) throw error;
+        log.warn({ code: error.code }, "provider_admission_unavailable");
+      }
     }
     return gateway;
   }
@@ -207,18 +216,36 @@ export class EnclaveGateway {
   }
 
   private async providerPreflight(): Promise<void> {
-    const verified = await createNearAttestationVerifier({ pythonPath: this.config.NEAR_VERIFIER_PYTHON!,
-      ...nvidiaVerifierOptions(this.config),
-      policyPath: this.config.NEAR_ATTESTATION_POLICY!, policySha256: this.config.NEAR_ATTESTATION_POLICY_SHA256!, apiKey: this.config.INFERENCE_API_KEY! })({
-      baseUrl: this.config.INFERENCE_BASE_URL, model: this.config.INFERENCE_MODEL, signal: AbortSignal.timeout(this.config.INFERENCE_TIMEOUT_MS),
-    });
-    // Admission never sends a prompt. Inference independently attests its own connection.
-    verified.close?.();
+    const attempt = ++this.providerPreflightAttempt;
+    this.providerAdmissionReady = false;
+    try {
+      const verified = await createNearAttestationVerifier({ pythonPath: this.config.NEAR_VERIFIER_PYTHON!,
+        ...nvidiaVerifierOptions(this.config),
+        policyPath: this.config.NEAR_ATTESTATION_POLICY!, policySha256: this.config.NEAR_ATTESTATION_POLICY_SHA256!, apiKey: this.config.INFERENCE_API_KEY! })({
+        baseUrl: this.config.INFERENCE_BASE_URL, model: this.config.INFERENCE_MODEL, signal: AbortSignal.timeout(this.config.INFERENCE_TIMEOUT_MS),
+      });
+      // Admission never sends a prompt. Inference independently attests its own connection.
+      verified.close?.();
+      // An older successful request cannot hide a newer admission failure.
+      if (attempt === this.providerPreflightAttempt) this.providerAdmissionReady = true;
+    } catch (error) {
+      // Every observed strict failure clears readiness, even if another request
+      // completed successfully while this preflight was still in flight.
+      this.providerAdmissionReady = false;
+      throw error;
+    }
   }
 
   private async assertNewPaymentAdmission(): Promise<void> {
     if (this.config.NODE_ENV !== "production" && !(this.config.TEE_MODE === "managed-near" && this.config.PAYMENT_MODE === "authorized")) return;
-    await this.syncTcb();
+    try { await this.syncTcb(); }
+    catch (error) {
+      // A known chain/TCB admission rejection also blocks readiness. Fence any
+      // older provider check that could otherwise restore a stale ready state.
+      this.providerPreflightAttempt++;
+      this.providerAdmissionReady = false;
+      throw error;
+    }
     await this.providerPreflight();
   }
 
@@ -260,7 +287,7 @@ export class EnclaveGateway {
   }
 
   health() {
-    const productionReady = this.config.NODE_ENV === "production" && this.acceptedRelease !== undefined && releaseIsFresh(this.acceptedRelease) && this.runtimeContractReady;
+    const productionReady = this.config.NODE_ENV === "production" && this.acceptedRelease !== undefined && releaseIsFresh(this.acceptedRelease) && this.runtimeContractReady && this.providerAdmissionReady;
     const managed = this.config.TEE_MODE === "managed-near";
     return {
       ok: true as const,
@@ -277,7 +304,7 @@ export class EnclaveGateway {
       agentRuntimeEnabled: this.config.AGENT_RUNTIME_ENABLED,
       inferencePriceUsdc: this.config.INFERENCE_PRICE_USDC,
       deployment: { stage: productionReady ? "production" as const : managed ? "pilot" as const : "development" as const,
-        productionReady, gatewayKeyCustody: "software" as const,
+        productionReady, providerAdmissionReady: this.providerAdmissionReady, gatewayKeyCustody: "software" as const,
         inferenceTrust: managed ? "near-cpu-gpu" as const : "development" as const,
         releaseProfile: managed ? "near-arc" as const : "development" as const },
       ...(this.acceptedRelease ? { providerPolicy: { sha256: this.acceptedRelease.providerPolicyHash,
@@ -442,7 +469,15 @@ export class EnclaveGateway {
       }
 
       await this.consumePayment(tx, keyHash, input.paymentId as string, price, requestHash);
-      const { receipt, output: outputBytes, providerProof, providerTranscript } = await cvm.infer(plaintext, { attRef: session.attRef as `0x${string}` });
+      const { receipt, output: outputBytes, providerProof, providerTranscript } = await cvm.infer(plaintext, { attRef: session.attRef as `0x${string}` }).catch((error: unknown) => {
+        if (error instanceof AppError && ["INFERENCE_ATTESTATION_FAILED", "NEAR_VERIFICATION_FAILED"].includes(error.code)) {
+          this.providerPreflightAttempt++;
+          this.providerAdmissionReady = false;
+        }
+        // Preserve the original failure for the existing durable execution
+        // quarantine; invalid readiness never authorizes another dispatch.
+        throw error;
+      });
       // A model may be revoked while the remote inference is in progress.
       await assertCurrentTcb(tx, state.policyHash);
       await this.assertRuntimeContractWiring();

@@ -26,9 +26,17 @@ and provider verification are separate checks.
 
 ### Release status
 
-The hosted NEAR + Arc production deployment accepts **0.10 USDC per request**.
-Real GPU inference, signed receipts and Arc settlement/anchoring passed acceptance.
-Manual wallet acceptance was confirmed by the project owner on 3 October 2026.
+The backend runs in production mode with a historically accepted NEAR + Arc
+release manifest. New payment/inference admission is blocked pending review of
+the current provider workload. The approved price is **0.10 USDC per request**.
+Real GPU inference, signed receipts and Arc settlement/anchoring passed historical
+acceptance on 1 October. Web QA fixes were deployed on 3 October 2026.
+Manual wallet acceptance is reopened after an OKX regression report; a real
+retest is still pending. The earlier owner confirmation
+on 3 October 2026 remains in the
+[acceptance history](https://github.com/nerdenpad/enclave-developer/blob/main/docs/release-progress.md#manual-wallet-regression--3-october-2026).
+The full E1 launch remains open pending current provider acceptance, that retest
+and live failure acceptance.
 
 What is live and what is still open is published in the
 [roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).

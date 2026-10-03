@@ -1,6 +1,6 @@
 # GitHub presentation
 
-Public pages follow the same shape as [UseCert](https://github.com/UseCert): a short profile, a repository README that states the accepted production deployment and remaining E1 acceptance in the opening, and an About box that matches that wording.
+Public pages follow the same shape as [UseCert](https://github.com/UseCert): a short profile, a repository README that states the production configuration, current admission limits and remaining E1 acceptance in the opening, and an About box that matches that wording.
 
 ## Repository
 
@@ -8,9 +8,9 @@ The root [README](../../README.md) is the public entry point. Detailed setup sta
 
 About description:
 
-> NEAR + Arc production inference with signed receipts and checked evidence. Public checkout is enabled at 0.10 USDC per request; final E1 failure acceptance remains open.
+> NEAR + Arc inference with signed receipts. Production deployment installed; new admissions blocked pending workload review. Approved tariff: 0.10 USDC/request.
 
-Manual wallet acceptance: passed, confirmed by the project owner on 3 October 2026. Live settlement interruption, signer rotation and model revocation acceptance remain open. Keep this distinction in the public release status.
+Web QA fixes were deployed on 3 October 2026. Manual wallet acceptance is reopened after an OKX regression report; a real retest is still pending. The earlier owner confirmation on 3 October 2026 is retained in [release progress](../release-progress.md#manual-wallet-regression--3-october-2026). Current provider admission review, live settlement interruption, signer rotation and model revocation acceptance remain open. Keep this distinction in the public release status.
 
 Website: https://enclaveagent.tech
 

@@ -1,6 +1,7 @@
 import { EnclaveClient, ApiError, canSettleLocally, type Health, type Workspace, type WorkspaceReceipt, type Model, type Policies, type PreparedInference, type VerifiedInference, type InferenceStep } from "./api";
 import { configuredArcPaymentPolicy } from "./arc-payment";
 import { paymentWallet, onWalletChanged } from "./wallet-runtime";
+import { WalletSessionUnavailableError } from "./wallet-session";
 import { loginWallet, logoutWallet, resumeWallet, walletLoginAvailable } from "./wallet-auth";
 import arc from "./arc-mainnet.json";
 import { arcTransactionUrl, receiptsCsv } from "./receipt-tools";
@@ -15,6 +16,8 @@ function message(error: unknown): string {
     if (error.code === "INFERENCE_EXECUTION_UNCERTAIN") return "Execution may already have started. This payment is quarantined for operator review. Do not retry or submit another payment for this request.";
     if (error.status === 401) return "The API key was rejected or the session expired. Reconnect your workspace.";
     if (error.code === "MANDATE_LIMIT_EXCEEDED" || error.code.includes("LIMIT")) return "This request exceeds a spending limit. No inference was started.";
+    if (error.code === "SETTLEMENT_PENDING") return "The gateway is reconciling this payment. Check payment history and keep the original request; do not create another payment.";
+    if (error.code === "INFERENCE_ATTESTATION_FAILED") return "The provider hardware check failed. The gateway did not accept unverified inference. Check this payment in history before retrying the original request.";
     if (error.status === 503) return "The gateway or inference provider is temporarily unavailable. The request was not retried. Check payment history before sending another request.";
     return `${error.message}${error.code ? ` · ${error.code}` : ""}`;
   }
@@ -38,6 +41,7 @@ export function mountDashboard(): () => void {
   const on = (selector: string, event: string, handler: (event: Event) => void) => $(selector).addEventListener(event, handler, { signal: life.signal });
   let client: EnclaveClient | null = null;
   let walletToken: string | null = null;
+  let walletAddress: string | null = null;
   let loginGeneration = 0;
   let loginExpiry: ReturnType<typeof setTimeout> | undefined;
   let signingIn = false;
@@ -80,11 +84,19 @@ export function mountDashboard(): () => void {
     busy = value;
     $$<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("#inference-form input,#inference-form select,#inference-form textarea,#inference-form button").forEach((control) => { control.disabled = value || Boolean(recovery); });
     select("#model-select").disabled = true;
-    $<HTMLButtonElement>("#run-inference").disabled = value || !client || Boolean(recovery);
+    $<HTMLButtonElement>("#run-inference").disabled = value || !client || Boolean(recovery) || !workspaceWalletReady();
     text("#run-inference span", value ? "Request in progress…" : "Run inference");
     $<HTMLButtonElement>("#disconnect-gateway").disabled = value;
-    $<HTMLButtonElement>("#retry-inference").disabled = value || Boolean(recovery?.quarantined);
+    $<HTMLButtonElement>("#retry-inference").disabled = value || Boolean(recovery?.quarantined) || !workspaceWalletReady();
     $<HTMLButtonElement>("#dismiss-recovery").disabled = value || Boolean(recovery?.quarantined);
+  }
+  function workspaceWalletReady() {
+    if (!walletToken) return true;
+    if (health && (health.paymentMode !== "authorized" || health.chainId !== arc.chainId)) return false;
+    try {
+      const wallet = paymentWallet();
+      return wallet.account.chainId === arc.chainId && wallet.account.address.toLowerCase() === walletAddress;
+    } catch { return false; }
   }
   function renderRecovery(quarantined: boolean) {
     $("#retry-inference").hidden = quarantined; $("#dismiss-recovery").hidden = quarantined;
@@ -103,6 +115,7 @@ export function mountDashboard(): () => void {
     if (state === "connecting" || state === "attesting") { step(0, "active", "Checking"); text("#output-status", "Opening a gateway session"); }
     if (state === "encrypting") { step(0, "done", "Admitted"); text("#output-status", "Encrypting request"); }
     if (state === "payment-required") { step(1, "active", "Required"); text("#output-status", "Awaiting payment confirmation"); }
+    if (state === "authorizing") { step(1, "active", "Awaiting approval"); text("#output-status", "Approve the USDC authorization in your wallet"); }
     if (state === "settling") { step(1, "active", "Settling"); text("#output-status", deploymentCopy(health, configuredArcPaymentPolicy() !== null).settling); }
     if (state === "inferencing") { step(1, "done", "Settled"); step(2, "active", "Running"); text("#output-status", "Waiting for the model response"); }
     if (state === "verifying") { step(2, "done", "Received"); step(3, "active", "Verifying"); text("#output-status", "Decrypting and verifying"); }
@@ -218,6 +231,7 @@ export function mountDashboard(): () => void {
   function clearWorkspace() {
     loginGeneration++; clearTimeout(loginExpiry);
     if (walletToken) { void logoutWallet(walletToken).catch(() => {}); walletToken = null; }
+    walletAddress = null;
     connectionVersion++; historyVersion++; refreshRequest++; pageRequest++; receiptVerification++;
     polling = false; paginationBusy = false; historyExpanded = false;
     client?.disconnect(); client = null; health = null; workspace = null; models = []; policies = null; pending = null; recovery = null; receipt = null;
@@ -253,9 +267,10 @@ export function mountDashboard(): () => void {
     if (busy && recovery) return;
     const version = connectionVersion;
     const current = () => !life.signal.aborted && client === active && version === connectionVersion;
+    let phase: InferenceStep = "payment-required";
     recovery = { client: active, request, quarantined: false }; renderRecovery(false); setBusy(true); text("#inference-error", "");
     void (async () => {
-      const runOptions = { ...options, onStep: (state: InferenceStep) => { if (current()) onStep(state); } };
+      const runOptions = { ...options, onStep: (state: InferenceStep) => { phase = state; if (current()) onStep(state); } };
       if (canSettleLocally(request.health)) return active.settleLocalAndRun(request, runOptions);
       const policy = configuredArcPaymentPolicy();
       if (!policy) throw new ApiError(403, "PAYMENTS_DISABLED", "Real payments have not been enabled on this deployment");
@@ -268,7 +283,13 @@ export function mountDashboard(): () => void {
       const quarantined = error instanceof ApiError && error.code === "INFERENCE_EXECUTION_UNCERTAIN";
       if (recovery) recovery.quarantined = quarantined;
       renderRecovery(quarantined);
-      text("#inference-error", message(error)); text("#output-status", quarantined ? "Execution uncertain · operator review required" : "Request interrupted · continuation available");
+      const walletUnavailable = error instanceof WalletSessionUnavailableError;
+      if (phase === "authorizing" || phase === "settling") step(1, "", phase === "authorizing" ? "Approval interrupted" : "Settlement interrupted");
+      text("#inference-error", message(error)); text("#output-status", quarantined ? "Execution uncertain · operator review required" : walletUnavailable ? "Wallet disconnected · reconnect to continue" : "Request interrupted · continuation available");
+      if (walletUnavailable) {
+        step(1, "", "Reconnect wallet");
+        text("#recovery-note", "Reconnect the same wallet on Arc, then choose Retry the same request. The original encrypted request and payment ID are retained. Reconnecting does not submit a payment.");
+      }
       text("#recovery-payment", `Payment ${request.challenge?.accepts[0]?.extra.paymentId ?? "unknown"}`);
       $("#inference-recovery").hidden = false; void refresh(true);
     }).finally(() => { if (current()) setBusy(false); });
@@ -309,6 +330,7 @@ export function mountDashboard(): () => void {
         return;
       }
       walletToken = session.token;
+      walletAddress = session.address.toLowerCase();
       await connectWorkspace(session.token, "/api", version);
       if (life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
       applyWalletSession(session.expiresAt);
@@ -325,17 +347,29 @@ export function mountDashboard(): () => void {
   function applyWalletSession(expiresAt: string) {
     loginExpiry = setTimeout(() => { clearWorkspace(); notify("Your wallet login expired. Sign in again."); }, Math.max(0, Date.parse(expiresAt) - Date.now()));
     text("#connection-note", "Signed in with your wallet. Login survives navigation and expires 30 minutes after signing.");
-    text("#wallet-login-status", "Signed in. Payments are confirmed separately in your wallet.");
+    text("#wallet-login-status", workspaceWalletReady() ? "Signed in. Payments are confirmed separately in your wallet." : "Signed in · wallet disconnected. Reconnect the same wallet on Arc to continue.");
     if (health?.paymentMode !== "authorized" || health.chainId !== 5042) {
       $<HTMLButtonElement>("#run-inference").disabled = true;
       text("#request-note", "Wallet sign-in is available. This gateway does not report authorized Arc settlement; public checkout is blocked.");
     }
     const walletReadActions = new Set(["export-receipts", "export-receipts-csv", "export-usage"]);
     $$<HTMLButtonElement>("[data-requires-connection]").filter(button => button.id !== "run-inference" && !walletReadActions.has(button.id)).forEach(button => { button.disabled = true; });
+    setBusy(busy);
   }
-  const stopWalletListener = onWalletChanged(() => {
+  const stopWalletListener = onWalletChanged(reason => {
+    if (walletToken && reason === "connection") {
+      const token = walletToken;
+      let wallet = null;
+      try { wallet = paymentWallet(); } catch { /* Reconnection is required before further approvals. */ }
+      if (walletToken !== token) return;
+      if (!wallet || wallet.account.chainId === arc.chainId && wallet.account.address.toLowerCase() === walletAddress) {
+        text("#wallet-login-status", wallet ? "Signed in. Payments are confirmed separately in your wallet." : "Signed in · wallet disconnected. Reconnect the same wallet on Arc to continue.");
+        setBusy(busy);
+        return;
+      }
+    }
     loginGeneration++;
-    if (walletToken) { clearWorkspace(); notify("Wallet changed. Sign in again to load its workspace."); }
+    if (walletToken) { clearWorkspace(); notify("Wallet changed or disconnected. Sign in again to load its workspace."); }
     else void restoreLogin();
   });
   void walletLoginAvailable().then(available => { if (!life.signal.aborted) { $("#wallet-login-panel").hidden = !available; $<HTMLDetailsElement>("#operator-access").open = !available; } });
@@ -346,11 +380,12 @@ export function mountDashboard(): () => void {
     signingIn = true; $<HTMLButtonElement>("#wallet-login").disabled = true;
     text("#connection-error", ""); text("#wallet-login-status", "Approve the sign-in message in your connected wallet. No payment is requested.");
     void (async () => {
-      const wallet = paymentWallet();
+      const wallet = paymentWallet("sign-in");
       const current = () => !life.signal.aborted && generation === loginGeneration && version === connectionVersion;
       const session = await loginWallet(wallet, current);
       if (!current()) { void logoutWallet(session.token).catch(() => {}); return; }
       walletToken = session.token;
+      walletAddress = session.address.toLowerCase();
       await connectWorkspace(session.token, "/api", version);
       if (!current()) return;
       applyWalletSession(session.expiresAt);
@@ -369,7 +404,7 @@ export function mountDashboard(): () => void {
       input("#api-key").value = ""; $("#connection-panel").classList.add("connected"); $("#disconnect-gateway").hidden = false;
       $$<HTMLButtonElement>("[data-requires-connection]").forEach(button => { button.disabled = false; });
       $$<HTMLButtonElement>("[id^=load-more-]").forEach(button => { button.disabled = false; });
-      renderHealth(); renderWorkspace(); notify("Workspace connected. History loaded from the backend.");
+      renderHealth(); renderWorkspace(); setBusy(busy); notify("Workspace connected. History loaded from the backend.");
     } catch (error) { next.disconnect(); throw error; }
   }
   on("#connection-form", "submit", (event) => {

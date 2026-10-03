@@ -19,10 +19,11 @@ const receiptTypes = { InferenceReceipt: [
   { name: "outHash", type: "bytes32" }, { name: "attRef", type: "bytes32" }, { name: "nonce", type: "bytes32" }, { name: "ts", type: "uint64" },
 ] } as const;
 
-async function fixture(page: Page, options: { rejectPayment?: boolean; lostResponse?: boolean; uncertainExecution?: boolean; historyRecord?: boolean; resumeAfterLogin?: boolean } = {}) {
+async function fixture(page: Page, options: { rejectPayment?: boolean; lostResponse?: boolean; uncertainExecution?: boolean; historyRecord?: boolean; resumeAfterLogin?: boolean; admissionFailureOnce?: boolean } = {}) {
   const walletCalls: string[] = [], requests: { path: string; body: string | null; headers: Record<string, string> }[] = [];
   const loginId = "ab".repeat(24), loginToken = `enws_${"ab".repeat(32)}`;
   let loginMessage = "", settlements = 0, paidAttempts = 0, loginVerified = false;
+  let admissionFailed = false;
   let delayedPolicies: { wait: Promise<void>; entered: () => void } | null = null;
   function holdNextPolicies() {
     let release!: () => void, entered!: () => void;
@@ -56,6 +57,7 @@ async function fixture(page: Page, options: { rejectPayment?: boolean; lostRespo
     const provider = { request: (args: { method: string; params?: unknown[] }) => Reflect.get(window, "fixtureWalletRequest")(args),
       on: (event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); },
       removeListener: (event: string) => { listeners.delete(event); } };
+    Reflect.set(window, "fixtureDropWallet", () => { listeners.get("disconnect")?.({ code: 4900 }); });
     const detail = { info: { uuid: "a139eb1f-44df-456a-ad70-197939cf0806", name: "Checkout fixture", rdns: "test.checkout", icon: "data:image/svg+xml,<svg/>" }, provider };
     window.addEventListener("eip6963:requestProvider", () => window.dispatchEvent(new CustomEvent("eip6963:announceProvider", { detail })));
   });
@@ -103,7 +105,10 @@ async function fixture(page: Page, options: { rejectPayment?: boolean; lostRespo
     if (headers["x-api-key"] !== loginToken) return reply({ title: "UNAUTHORIZED", status: 401 }, 401);
     if (path === "/v1/workspace") return reply(workspace);
     if (path === "/v1/session") return reply({ sessionId, expiresAt: new Date(Date.now() + 1_800_000).toISOString(), wrapKey: sessionKey.toString("base64") });
-    if (path === "/v1/x402/settle") { settlements++; return reply({ paymentId, tx: hash("settlement"), confidential: false }); }
+    if (path === "/v1/x402/settle") {
+      if (options.admissionFailureOnce && !admissionFailed) { admissionFailed = true; return reply({ title: "INFERENCE_ATTESTATION_FAILED", status: 503 }, 503); }
+      settlements++; return reply({ paymentId, tx: hash("settlement"), confidential: false });
+    }
     if (path === "/v1/inference") {
       if (!headers["x-payment"]) return reply({ title: "PAYMENT_REQUIRED", status: 402, details: { x402Version: 1, accepts: [{ scheme: "exact", network: "arc-5042",
         maxAmountRequired: "100000", payTo: meter, asset: token, extra: { paymentId, receiptPending: true } }] } }, 402);
@@ -153,6 +158,72 @@ test("declining the candidate payment performs no settlement or paid inference",
   await expect(page.locator("#payment-dialog")).toBeVisible(); await page.locator("#confirm-payment").click();
   await expect(page.locator("#inference-recovery")).toBeVisible();
   expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+});
+
+test("lost wallet session preserves the original request until explicit same-wallet reconnection", async ({ page }) => {
+  const f = await fixture(page);
+  await page.locator("#prompt").fill("Keep this encrypted request when the wallet disconnects");
+  await page.locator("#run-inference").click(); await expect(page.locator("#payment-dialog")).toBeVisible();
+  await page.evaluate(() => { Reflect.get(window, "fixtureDropWallet")(); });
+  await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeVisible();
+  await expect(page.locator("#wallet-login-status")).toContainText("Signed in · wallet disconnected");
+  await page.locator("#confirm-payment").click(); await expect(page.locator("#inference-recovery")).toBeVisible();
+  await expect(page.locator("#recovery-payment")).toContainText(paymentId);
+  await expect(page.locator("#retry-inference")).toBeDisabled();
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await page.getByRole("button", { name: "Checkout fixture" }).click();
+  await expect(page.locator("#wallet-login-status")).toHaveText("Signed in. Payments are confirmed separately in your wallet.");
+  await expect(page.locator("#retry-inference")).toBeEnabled();
+  await page.locator("#retry-inference").click(); await expect(page.locator("#inference-output")).toHaveText(output);
+  expect(f.counts()).toEqual({ settlements: 1, paidAttempts: 1 });
+  expect(f.walletCalls.filter(method => method === "personal_sign")).toHaveLength(1);
+  expect(f.requests.filter(req => req.path === "/v1/auth/wallet/challenge")).toHaveLength(1);
+  const attempts = f.requests.filter(req => req.path === "/v1/inference");
+  expect(new Set(attempts.map(req => req.body)).size).toBe(1);
+  expect(new Set(attempts.map(req => req.headers["idempotency-key"])).size).toBe(1);
+  expect(attempts.at(-1)?.headers["x-payment"]).toBe(paymentId);
+});
+
+test("wallet loss while login is loading retains expiry and restricted workspace actions", async ({ page }) => {
+  const f = await fixture(page, { historyRecord: true, resumeAfterLogin: true });
+  await page.clock.install();
+  const held = f.holdNextPolicies();
+  await page.goto("/"); await page.goto("/dashboard"); await held.started;
+  await page.evaluate(() => { Reflect.get(window, "fixtureDropWallet")(); });
+  held.release();
+  await expect(page.locator("#connection-status")).toContainText("Connected");
+  await expect(page.locator("#wallet-login-status")).toContainText("Signed in · wallet disconnected");
+  await expect(page.locator("#run-inference")).toBeDisabled();
+  await expect(page.locator("#new-agent")).toBeDisabled(); await expect(page.locator("#issue-view-key")).toBeDisabled();
+  await expect(page.locator("#export-receipts-csv")).toBeEnabled();
+  await page.clock.fastForward(1_805_000);
+  await expect(page.locator("#connection-status")).toHaveText("Disconnected");
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+});
+
+test("sign-in without a connected wallet asks for login connection rather than payment", async ({ page }) => {
+  const f = await fixture(page);
+  await page.getByRole("button", { name: "Disconnect wallet", exact: true }).click();
+  await page.locator("#wallet-login").click();
+  await expect(page.locator("#connection-error")).toHaveText("Connect a wallet before signing in");
+  expect(f.requests.filter(req => req.path === "/v1/auth/wallet/challenge")).toHaveLength(1);
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+});
+
+test("rejected provider admission stops settlement display and preserves exact authorization for retry", async ({ page }) => {
+  const f = await fixture(page, { admissionFailureOnce: true });
+  await page.locator("#prompt").fill("Keep the admitted payment intent when hardware verification rejects a node");
+  await page.locator("#run-inference").click(); await expect(page.locator("#payment-dialog")).toBeVisible();
+  await page.locator("#confirm-payment").click(); await expect(page.locator("#inference-recovery")).toBeVisible();
+  await expect(page.locator('[data-step="1"] i')).toHaveText("Settlement interrupted");
+  await expect(page.locator("#inference-error")).toContainText("provider hardware check failed");
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+  await page.locator("#retry-inference").click(); await expect(page.locator("#inference-output")).toHaveText(output);
+  expect(f.counts()).toEqual({ settlements: 1, paidAttempts: 1 });
+  expect(f.walletCalls.filter(method => method === "eth_signTypedData_v4")).toHaveLength(1);
+  const settlements = f.requests.filter(req => req.path === "/v1/x402/settle");
+  expect(settlements).toHaveLength(2); expect(settlements[0]?.body).toBe(settlements[1]?.body);
 });
 
 test("explicit candidate recovery reuses the paid request without another signature or settlement", async ({ page }) => {

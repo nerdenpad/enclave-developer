@@ -19,7 +19,7 @@ export async function restoreWallet(signal: AbortSignal, changed: AccountListene
   catch { forgetWallet(); return null; }
   // Suppress initial account events until the remembered identity has been checked.
   let ready = false;
-  const updated: AccountListener = value => { if (ready) changed(value); };
+  const updated: AccountListener = (value, reason) => { if (ready) changed(value, reason); };
   try {
     let result: WalletConnection;
     if (saved.transport === "walletconnect") {
@@ -43,6 +43,7 @@ export async function restoreWallet(signal: AbortSignal, changed: AccountListene
       result = await connectBrowserWallet(wallet, signal, updated, saved.address);
     }
     if (signal.aborted) { result.detach?.(); return null; }
+    try { result.assertActive?.(); } catch (error) { result.detach?.(); throw error; }
     ready = true;
     return result;
   } catch { if (!signal.aborted) forgetWallet(); return null; }

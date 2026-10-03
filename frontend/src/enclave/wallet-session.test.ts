@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type SignClient from "@walletconnect/sign-client";
-import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId, switchBrowserToArc } from "./wallet-session";
+import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId, switchBrowserToArc, WalletSessionUnavailableError } from "./wallet-session";
 import type { BrowserProvider } from "./wallets";
 import { privateKeyToAccount } from "viem/accounts";
+import { createSiweMessage } from "viem/siwe";
 import { receiveData } from "./arc-payment";
 
 const first = `0x${"11".repeat(20)}`, second = `0x${"22".repeat(20)}`;
@@ -17,13 +18,56 @@ function browser() {
 function session() { return { topic: "topic", expiry: Math.floor(Date.now() / 1000) + 60, peer: { metadata: { name: "Remote wallet" } }, namespaces: { eip155: { accounts: [`eip155:1:${first}`], methods: ["eth_signTypedData_v4", "personal_sign"] } } }; }
 function wc() {
   const gate = deferred<ReturnType<typeof session>>();
-  const listeners = new Map<string, (value: { topic: string }) => void>();
+  const sessions = new Map<string, ReturnType<typeof session>>();
+  type SessionEvent = { topic: string; params?: { namespaces?: unknown; chainId?: string; event?: { name: string; data: unknown } } };
+  const listeners = new Map<string, (value: SessionEvent) => void>();
   const disconnect = vi.fn().mockResolvedValue(undefined), pairingDisconnect = vi.fn().mockResolvedValue(undefined);
-  const connect = vi.fn().mockResolvedValue({ uri: `wc:${"a".repeat(64)}@2?symKey=test`, approval: () => gate.promise });
-  const client = { connect, disconnect, core: { pairing: { disconnect: pairingDisconnect } }, on: (event: string, fn: (value: { topic: string }) => void) => listeners.set(event, fn), off: (event: string) => listeners.delete(event) };
-  return { gate, listeners, disconnect, pairingDisconnect, connect, getClient: async () => client as unknown as SignClient };
+  const request = vi.fn<({ topic, chainId, request }: { topic: string; chainId: string; request: { method: string; params: unknown[] } }) => Promise<unknown>>().mockResolvedValue(undefined);
+  const connect = vi.fn().mockResolvedValue({ uri: `wc:${"a".repeat(64)}@2?symKey=test`, approval: () => gate.promise.then(value => { sessions.set(value.topic, value); return value; }) });
+  const get = vi.fn((topic: string) => { const value = sessions.get(topic); if (!value) throw Error(`No matching key. session topic doesn't exist: ${topic}`); return value; });
+  const client = { connect, disconnect, request, session: { get }, core: { pairing: { disconnect: pairingDisconnect } }, on: (event: string, fn: (value: SessionEvent) => void) => listeners.set(event, fn), off: (event: string) => listeners.delete(event) };
+  return { gate, sessions, get, request, listeners, disconnect, pairingDisconnect, connect, getClient: async () => client as unknown as SignClient };
 }
+const signer = privateKeyToAccount(`0x${"11".repeat(32)}`);
+function arcSession(topic = "topic") { const live = session(); live.topic = topic; live.namespaces.eip155.accounts = [`eip155:5042:${signer.address}`]; return live; }
+function intent() { return { payer: signer.address, meter: second, amountUnits: "100000", paymentId: "10000000-0000-4000-8000-000000000002", validBefore: String(Math.floor(Date.now() / 1000) + 600) }; }
+async function approvedWallet(live = arcSession()) {
+  const mock = wc(), changed = vi.fn();
+  const pending = connectWalletConnect("a".repeat(32), 5042, new AbortController().signal, vi.fn(), changed, mock.getClient);
+  mock.gate.resolve(live);
+  return { mock, changed, live, connection: await pending };
+}
+function loginMessage() { return createSiweMessage({ domain: "enclaveagent.tech", address: signer.address, uri: "https://enclaveagent.tech/dashboard",
+  version: "1", chainId: 5042, nonce: "a".repeat(48), issuedAt: new Date(), expirationTime: new Date(Date.now() + 300_000),
+  statement: "Sign in to Enclave. This does not authorize a payment." }); }
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("browser wallet lifecycle", () => {
+  it.each(["account", "chain"])("reports a valid %s event synchronously and preserves identity loss if provider reads fail", async kind => {
+    const mock = browser(), changed = vi.fn();
+    await connectBrowserWallet(mock.wallet, new AbortController().signal, changed); changed.mockClear();
+    mock.request.mockRejectedValue(Error("Provider unavailable"));
+    mock.listeners.get(kind === "account" ? "accountsChanged" : "chainChanged")?.(kind === "account" ? [second] : "0x13b2");
+    expect(changed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(kind === "account" ? { address: second } : { chainId: 5042 }), "identity");
+    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(null, "identity"));
+    expect(mock.listeners.size).toBe(0);
+  });
+  it("detects a rapid account change and return before either provider read finishes", async () => {
+    const mock = browser(), changed = vi.fn(), gate = deferred<unknown>();
+    const connection = await connectBrowserWallet(mock.wallet, new AbortController().signal, changed); changed.mockClear();
+    mock.request.mockImplementation(async ({ method }) => method === "eth_accounts" ? gate.promise : mock.state.chain);
+    mock.listeners.get("accountsChanged")?.([second]); mock.listeners.get("accountsChanged")?.([first]);
+    expect(changed.mock.calls).toEqual([[expect.objectContaining({ address: second }), "identity"], [expect.objectContaining({ address: first }), "identity"]]);
+    gate.resolve([first]); await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(3)); connection.detach?.();
+  });
+  it("treats empty accounts as immediate connection loss and malformed event payloads as a read failure", async () => {
+    const mock = browser(), changed = vi.fn();
+    await connectBrowserWallet(mock.wallet, new AbortController().signal, changed); changed.mockClear(); mock.request.mockClear();
+    mock.listeners.get("accountsChanged")?.([]);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.request).not.toHaveBeenCalled();
+    const malformed = browser(), update = vi.fn(); await connectBrowserWallet(malformed.wallet, new AbortController().signal, update); update.mockClear();
+    malformed.request.mockRejectedValue(Error("Provider unavailable")); malformed.listeners.get("accountsChanged")?.(["invalid"]);
+    expect(update).not.toHaveBeenCalled(); await vi.waitFor(() => expect(update).toHaveBeenCalledExactlyOnceWith(null));
+  });
   it("silently restores only the selected address and detaches without disconnecting", async () => {
     const mock = browser(), changed = vi.fn();
     const connection = await connectBrowserWallet(mock.wallet, new AbortController().signal, changed, first);
@@ -56,7 +100,7 @@ describe("browser wallet lifecycle", () => {
     expect(connection.account.address).toBe(first);
     mock.state.accounts = [second]; mock.state.chain = "0x2105";
     mock.listeners.get("accountsChanged")?.();
-    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ address: second, chainId: 8453 })));
+    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ address: second, chainId: 8453 }), "identity"));
     expect(mock.request.mock.calls.every(([args]) => ["eth_requestAccounts", "eth_accounts", "eth_chainId"].includes(args.method))).toBe(true);
     await connection.disconnect();
     expect(mock.listeners.size).toBe(0);
@@ -85,6 +129,154 @@ describe("browser wallet lifecycle", () => {
   });
 });
 describe("WalletConnect lifecycle", () => {
+  it("invalidates a session lost after successful login before requesting payment approval", async () => {
+    vi.stubGlobal("location", { origin: "https://enclaveagent.tech" });
+    const { mock, changed, connection } = await approvedWallet(), message = loginMessage();
+    mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    await expect(connection.signIn(message)).resolves.toMatch(/^0x/);
+    mock.sessions.clear(); changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: "missing" });
+    expect(mock.request).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.listeners.size).toBe(0);
+    expect(() => connection.account).toThrow(WalletSessionUnavailableError);
+    await connection.disconnect(); expect(changed).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    Error("There is no existing session matching the topic"),
+    { code: 2, message: "No matching key. session topic doesn't exist: topic" },
+    "Missing or invalid. session topic does not exist in keychain: topic",
+  ])("invalidates a topic rejected by the wallet or SDK even while its local store still exists: %j", async error => {
+    const { mock, changed, connection } = await approvedWallet();
+    mock.request.mockRejectedValueOnce(error); changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: "missing" });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.listeners.size).toBe(0);
+    await expect(connection.authorizeArc(intent())).rejects.toThrow(WalletSessionUnavailableError);
+    expect(mock.request).toHaveBeenCalledTimes(1);
+  });
+  it("keeps an approved session available after the user rejects a signature", async () => {
+    const { mock, changed, connection } = await approvedWallet();
+    mock.request.mockRejectedValueOnce({ code: 4001, message: "User rejected the request" }); changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ code: 4001 });
+    expect(connection.account.address).toBe(signer.address); expect(changed).not.toHaveBeenCalled();
+    const payment = intent(); mock.request.mockResolvedValueOnce(await signer.signTypedData(receiveData(payment)));
+    await expect(connection.authorizeArc(payment)).resolves.toMatchObject({ from: signer.address });
+    expect(mock.request).toHaveBeenCalledTimes(2); connection.detach?.();
+  });
+  it.each(["account", "chain", "expiry", "method", "topic"])("rejects a silently changed live %s before requesting a signature", async change => {
+    const { mock, changed, live, connection } = await approvedWallet();
+    if (change === "account") live.namespaces.eip155.accounts = [`eip155:5042:${second}`];
+    if (change === "chain") live.namespaces.eip155.accounts = [`eip155:1:${signer.address}`];
+    if (change === "expiry") live.expiry = Math.floor(Date.now() / 1000) - 1;
+    if (change === "method") live.namespaces.eip155.methods = ["personal_sign"];
+    if (change === "topic") live.topic = "replacement";
+    changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toThrow(WalletSessionUnavailableError);
+    expect(mock.request).not.toHaveBeenCalled(); expect(changed).toHaveBeenCalledExactlyOnceWith(...(change === "expiry" || change === "topic" ? [null] : [null, "identity"]));
+    expect(mock.listeners.size).toBe(0);
+  });
+  it("checks the fresh login capability rather than the original approval", async () => {
+    const { mock, changed, live, connection } = await approvedWallet();
+    live.namespaces.eip155.methods = ["eth_signTypedData_v4"]; changed.mockClear();
+    await expect(connection.signIn(loginMessage())).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: "changed" });
+    expect(mock.request).not.toHaveBeenCalled(); expect(changed).toHaveBeenCalledExactlyOnceWith(null, "identity");
+  });
+  it("rejects a payer mismatch or another connection chain without signing or discarding its approval", async () => {
+    const { mock, connection } = await approvedWallet();
+    await expect(connection.authorizeArc({ ...intent(), payer: second })).rejects.toThrow("payer wallet");
+    expect(connection.account.address).toBe(signer.address); expect(mock.request).not.toHaveBeenCalled(); connection.detach?.();
+    const other = wc(), pending = connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), other.getClient);
+    other.gate.resolve(session()); const otherConnection = await pending;
+    await expect(otherConnection.authorizeArc({ ...intent(), payer: first })).rejects.toThrow("Arc Mainnet");
+    await expect(otherConnection.signIn(loginMessage())).rejects.toThrow("Arc Mainnet");
+    expect(other.request).not.toHaveBeenCalled(); otherConnection.detach?.();
+  });
+  it.each(["missing", "account", "expiry"])("rejects a valid late signature when the fresh session becomes %s during approval", async change => {
+    const { mock, changed, live, connection } = await approvedWallet(), gate = deferred<unknown>(), payment = intent();
+    mock.request.mockReturnValueOnce(gate.promise);
+    const pending = connection.authorizeArc(payment), rejected = expect(pending).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalled());
+    if (change === "missing") mock.sessions.clear();
+    if (change === "account") live.namespaces.eip155.accounts = [`eip155:5042:${second}`];
+    if (change === "expiry") live.expiry = 0;
+    changed.mockClear(); gate.resolve(await signer.signTypedData(receiveData(payment))); await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(...(change === "account" ? [null, "identity"] : [null])); expect(mock.listeners.size).toBe(0);
+  });
+  it.each(["session_delete", "session_expire", "session_update", "session_event"])("immediately rejects pending approval on %s and consumes a late SDK failure", async event => {
+    const { mock, changed, connection } = await approvedWallet(), gate = deferred<unknown>();
+    mock.request.mockReturnValueOnce(gate.promise);
+    const pending = connection.authorizeArc(intent()), rejected = expect(pending).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalled());
+    changed.mockClear(); const listener = mock.listeners.get(event)!;
+    listener({ topic: "other" }); expect(changed).not.toHaveBeenCalled();
+    listener({ topic: "topic", ...(event === "session_update" ? { params: { namespaces: { eip155: { accounts: [`eip155:5042:${second}`], methods: ["eth_signTypedData_v4", "personal_sign"] } } } } : event === "session_event" ? { params: { chainId: "eip155:5042", event: { name: "accountsChanged", data: [second] } } } : {}) }); await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(...(event === "session_update" || event === "session_event" ? [null, "identity"] : [null])); expect(mock.listeners.size).toBe(0);
+    listener({ topic: "topic" }); expect(changed).toHaveBeenCalledTimes(1);
+    gate.reject(Error("There is no existing session matching the topic")); await Promise.resolve(); await Promise.resolve();
+    expect(mock.request).toHaveBeenCalledTimes(1);
+  });
+  it.each(["session_update", "session_event"])("keeps the connection and pending approval active on a benign %s with the same identity and capabilities", async event => {
+    const { mock, changed, live, connection } = await approvedWallet(), gate = deferred<unknown>(), payment = intent();
+    mock.request.mockReturnValueOnce(gate.promise);
+    const pending = connection.authorizeArc(payment);
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalled()); changed.mockClear();
+    const renewed = { ...live, expiry: live.expiry + 60, namespaces: { eip155: { ...live.namespaces.eip155, methods: [...live.namespaces.eip155.methods].reverse() } } };
+    mock.sessions.set("topic", renewed);
+    mock.listeners.get(event)?.({ topic: "topic", params: event === "session_update" ? { namespaces: renewed.namespaces } : { chainId: "eip155:5042", event: { name: "accountsChanged", data: [signer.address] } } });
+    expect(changed).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+    expect(() => connection.assertActive?.()).not.toThrow(); expect(mock.listeners.size).toBe(4);
+    gate.resolve(await signer.signTypedData(receiveData(payment))); await expect(pending).resolves.toMatchObject({ from: signer.address });
+    connection.detach?.();
+  });
+  it.each(["account", "chain", "capability", "invalid"])("marks a proposed %s approval change as identity loss even before the SDK store updates", async change => {
+    const { mock, changed, live } = await approvedWallet(); changed.mockClear();
+    const namespaces = structuredClone(live.namespaces);
+    if (change === "account") namespaces.eip155.accounts = [`eip155:5042:${second}`];
+    if (change === "chain") namespaces.eip155.accounts = [`eip155:1:${signer.address}`];
+    if (change === "capability") namespaces.eip155.methods = ["eth_signTypedData_v4"];
+    mock.listeners.get("session_update")?.({ topic: "topic", params: { namespaces: change === "invalid" ? {} : namespaces } });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null, "identity"); expect(mock.listeners.size).toBe(0);
+  });
+  it("preserves recovery when a WalletConnect account event reports a locked wallet", async () => {
+    const { mock, changed } = await approvedWallet(); changed.mockClear();
+    mock.listeners.get("session_event")?.({ topic: "topic", params: { chainId: "eip155:5042", event: { name: "accountsChanged", data: [] } } });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.listeners.size).toBe(0);
+  });
+  it("expires the connection without requiring another user action", async () => {
+    vi.useFakeTimers();
+    const { mock, changed, live, connection } = await approvedWallet(); changed.mockClear();
+    await vi.advanceTimersByTimeAsync(live.expiry * 1000 - Date.now());
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.listeners.size).toBe(0);
+    expect(() => connection.assertActive?.()).toThrow(WalletSessionUnavailableError);
+  });
+  it("consumes SDK cleanup failures on explicit disconnect and approval changes", async () => {
+    const { mock, changed, connection } = await approvedWallet();
+    mock.disconnect.mockRejectedValue(Error("No matching key. session topic doesn't exist: topic")); changed.mockClear();
+    await expect(connection.disconnect()).resolves.toBeUndefined();
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.listeners.size).toBe(0);
+    const updated = await approvedWallet(); updated.mock.disconnect.mockRejectedValue(Error("Topic deleted"));
+    updated.live.namespaces.eip155.accounts = [`eip155:5042:${second}`];
+    updated.mock.listeners.get("session_update")?.({ topic: "topic" }); await Promise.resolve();
+    expect(updated.mock.listeners.size).toBe(0);
+  });
+  it("requires explicit reconnect and accepts a new session for the same wallet without retrying the failed signature", async () => {
+    const lost = await approvedWallet();
+    lost.mock.request.mockRejectedValueOnce(Error("There is no existing session matching the topic"));
+    await expect(lost.connection.authorizeArc(intent())).rejects.toThrow(WalletSessionUnavailableError);
+    const reconnected = await approvedWallet(arcSession("new-topic")), payment = intent();
+    reconnected.mock.request.mockResolvedValueOnce(await signer.signTypedData(receiveData(payment)));
+    await expect(reconnected.connection.authorizeArc(payment)).resolves.toMatchObject({ from: signer.address });
+    expect(lost.mock.connect).toHaveBeenCalledTimes(1); expect(lost.mock.request).toHaveBeenCalledTimes(1);
+    expect(reconnected.mock.request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ topic: "new-topic", chainId: "eip155:5042" }));
+    reconnected.connection.detach?.();
+  });
+  it("detaches pending approvals without disconnecting the reusable session or notifying the UI", async () => {
+    const { mock, changed, connection } = await approvedWallet(), gate = deferred<unknown>();
+    mock.request.mockReturnValueOnce(gate.promise);
+    const pending = connection.authorizeArc(intent()), rejected = expect(pending).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalled()); changed.mockClear(); connection.detach?.(); await rejected;
+    gate.reject(Error("late rejection")); await Promise.resolve(); await Promise.resolve();
+    expect(mock.disconnect).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled(); expect(mock.listeners.size).toBe(0);
+  });
   it("restores an approved session without a new pairing and preserves it on detach", async () => {
     const mock = wc(), live = session(), client = await mock.getClient();
     Object.assign(client, { session: { get: vi.fn(() => live) } });
@@ -110,8 +302,9 @@ describe("WalletConnect lifecycle", () => {
     const connection = await pending;
     expect(connection.account.address).toBe(first);
     expect(mock.connect).toHaveBeenCalledWith({ requiredNamespaces: { eip155: { chains: ["eip155:1"], methods: ["eth_signTypedData_v4", "personal_sign"], events: ["accountsChanged", "chainChanged"] } } });
+    mock.sessions.get("topic")!.namespaces.eip155.accounts = [`eip155:1:${second}`];
     mock.listeners.get("session_update")?.({ topic: "topic" });
-    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(null));
+    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(null, "identity"));
     expect(mock.disconnect).toHaveBeenCalledTimes(1); expect(mock.listeners.size).toBe(0);
   });
   it("cancels pairing and closes a session approved after the dialog closes", async () => {

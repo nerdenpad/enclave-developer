@@ -1,6 +1,6 @@
 # Wallet connections and real USDC
 
-The final domain is **enclaveagent.tech**. The selected payment network is **Arc Mainnet (5042)**. The hosted backend runs the accepted NEAR + Arc production profile. Wallet connection is implemented separately from payments. Public checkout is enabled at the approved **0.10 USDC per request**. A real operator WalletConnect browser session passed wallet sign-in, navigation/reload, one payment, one inference, receipt export and independent Arc verification. Manual wallet acceptance: passed, confirmed by the project owner on **3 October 2026**. Live settlement interruption, signer rotation and model revocation acceptance remain open, so E1 public launch remains open. See the [Arc deployment profile](arc-deployment.md) and [release progress](release-progress.md).
+The final domain is **enclaveagent.tech**. The selected payment network is **Arc Mainnet (5042)**. The backend runs in production mode with a historically accepted NEAR + Arc release manifest. New payment/inference admission is blocked pending strict review and fresh acceptance of the current provider workload. Wallet connection is implemented separately from payments. Public checkout is enabled at the approved **0.10 USDC per request**. A real operator WalletConnect browser session passed wallet sign-in, navigation/reload, one payment, one inference, receipt export and independent Arc verification on 1 October. Web QA fixes were deployed on **3 October 2026**. Manual wallet acceptance is reopened after a detailed OKX failure report; a real OKX retest is still pending. Live settlement interruption, signer rotation and model revocation acceptance remain open, so E1 public launch remains open. See the [Arc deployment profile](arc-deployment.md) and [release progress](release-progress.md).
 
 ## Implemented connection
 
@@ -34,9 +34,18 @@ in a protected local operator helper; no key was sent to the browser or server.
 This exercises the real WalletConnect protocol with an operator EOA, not a
 physical wallet-app UI.
 
-Manual wallet acceptance: passed, confirmed by the project owner on
-**3 October 2026**. Interruption during live settlement and recovery, signer
-rotation and model revocation remain separate open acceptance scenarios.
+The project owner confirmed manual wallet acceptance on **3 October 2026**.
+Acceptance was subsequently reopened following the detailed OKX failure report
+for **2 October 2026, 22:16–22:24 Moscow time**. Corrective web fixes were deployed
+on **3 October 2026**. A real OKX retest is pending current provider admission
+acceptance; the earlier confirmation remains in the
+[acceptance history](release-progress.md#manual-wallet-regression--3-october-2026).
+The 3 October canonical Arc readback found the reported payment's exact intent
+unsettled in UsageMeter at block **24086493** with **12 successor blocks**.
+This payment-specific check does not establish the status of other wallet transfers;
+its payment ID and scope are retained in that acceptance history.
+Interruption during live settlement and recovery, signer rotation and model
+revocation remain separate open acceptance scenarios.
 
 Across the API and browser acceptance runs, confirmed usage is **three calls and
 0.30 USDC**, each with its own intent and one settlement. The third API request

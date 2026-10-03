@@ -59,3 +59,9 @@ body:has(.dashboard-main){background:#f5f8ff}.dashboard-main{padding:116px 0 35p
 .en-footer .footer-navigation .social-button svg{display:block;width:22px;height:22px;flex:none;fill:currentColor}
 .en-footer .footer-navigation a.social-button:focus-visible{outline:2px solid #718bd1;outline-offset:4px}
 @media(hover:hover) and (pointer:fine){.en-footer .footer-navigation a.social-button:hover{background:#e3eafa;border-color:#9aafd9;color:#394b7a}}
+
+/* Keep Foundation's animated words inside the mobile text column. */
+@media(max-width:809px){
+  .framer-9455y0 .framer-18xwwhp .framer-1gmue9y{width:100%;min-width:0;white-space:normal}
+  .framer-9455y0 .framer-1gmue9y h2{white-space:normal}
+}

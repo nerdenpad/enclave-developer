@@ -57,7 +57,7 @@ the selected model requires this explicit override. See the
 [pinned model template](https://huggingface.co/zai-org/GLM-5.3-Flash/blob/3f1971b7b5f7a528c9c4ef6212c8785298a8c24a/chat_template.jinja)
 and [model publisher guidance](https://docs.z.ai/guides/vlm/glm-5.3-flash).
 
-Production startup requires all of the following:
+Production readiness requires all of the following:
 
 - Explicit NEAR endpoint profile, its exact canonical HTTPS endpoint and pinned reviewed provider policy bytes. Direct mode uses only the approved `<model-label>.completions.near.ai/v1` endpoint; it does not silently fall back to the Cloud Gateway.
 - Reviewed acceptance manifest matching runtime configuration and the persistent receipt signer.
@@ -67,6 +67,12 @@ Production startup requires all of the following:
 - Independent replay of the archived provider/node evidence and exact transcript bindings, followed by a fresh node attestation preflight on the accepted endpoint. Cloud mode also verifies the Gateway and every returned model candidate. Startup sends no inference prompt.
 
 Missing keys cannot be regenerated during production startup. Expired acceptance rejects further admissions. Every inference still performs fresh provider verification; an accepted manifest never bypasses live attestation.
+
+The backend readiness correction was deployed on 3 October 2026. After
+validating the release, archived evidence, keys and chain wiring, it keeps status,
+wallet sign-in and stored history available on a known fresh provider rejection,
+while reporting not ready and rejecting new payment/inference admission. See the
+[correction record](release-progress.md#backend-readiness-correction--3-october-2026).
 
 Build the frontend with the agreed public payment configuration only after acceptance. The `/status` page reports the inference route, active release profile, provider policy fingerprint and expiry, payment network and known verification boundaries. Direct mode is labeled **Experimental direct NEAR**, including after acceptance. Production readiness remains a gateway report of validated release checks; this page does not independently prove hardware, transcript or payment acceptance. Gateway key custody remains software-managed.
 

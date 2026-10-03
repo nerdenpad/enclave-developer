@@ -38,7 +38,7 @@ export async function signArcPayment(intent: ArcPaymentIntent, request: (args: {
 }
 
 // Explicit release configuration is required in addition to an authorized gateway.
-// No environment values are supplied on the public pilot.
+// The published checkout uses the explicitly reviewed deployment values.
 export function configuredArcPaymentPolicy(): ArcPaymentPolicy | null {
   if (import.meta.env["VITE_ARC_PAYMENTS_ENABLED"] !== "true") return null;
   const parsed = ArcPaymentPolicySchema.safeParse({ meter: import.meta.env["VITE_ARC_USAGE_METER"],

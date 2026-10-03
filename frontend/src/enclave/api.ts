@@ -107,7 +107,7 @@ export type WorkspacePayment = Workspace["payments"][number];
 export interface StoredReceiptVerification { signature: true; typedHash: true; ioHashesVerified: false; hardwareAttestationVerified: false }
 export interface WorkspaceQuery { limit?: number; receiptsBefore?: string; paymentsBefore?: string; agentsBefore?: string }
 export interface RequestOptions { signal?: AbortSignal }
-export type InferenceStep = "connecting" | "attesting" | "encrypting" | "payment-required" | "settling" | "inferencing" | "verifying" | "complete";
+export type InferenceStep = "connecting" | "attesting" | "encrypting" | "payment-required" | "authorizing" | "settling" | "inferencing" | "verifying" | "complete";
 export interface InferenceOptions extends RequestOptions { onStep?: (step: InferenceStep) => void }
 export interface Session { readonly sessionId: string; readonly expiresAt: string; readonly attRef: Hex }
 export interface PreparedInference {
@@ -395,6 +395,7 @@ export class EnclaveClient {
           const intent = { payer, meter: policy.meter, amountUnits: requirement.maxAmountRequired, paymentId,
             validBefore: String(Math.min(Math.floor(Date.now() / 1000) + 600, Math.floor(Date.parse(state.session.expiresAt) / 1000))) };
           const typed = receiveData(intent);
+          options.onStep?.("authorizing");
           const auth = await wallet.authorizeArc(intent);
           checkActive();
           if (!same(auth.from, payer) || auth.validAfter !== "0" || auth.validBefore !== intent.validBefore

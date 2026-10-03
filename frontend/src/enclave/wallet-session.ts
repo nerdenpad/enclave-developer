@@ -8,10 +8,17 @@ import { signArcPayment, type ArcPaymentIntent, type ArcAuthorization } from "./
 const address = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 const addresses = z.array(address).max(100);
 export type WalletAccount = { address: string; chainId: number; name: string; transport: "browser" | "walletconnect" };
-export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; detach?: () => void; topic?: string; switchToArc?: () => Promise<void>;
+export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; detach?: () => void; topic?: string; switchToArc?: () => Promise<void>; assertActive?: () => void;
   signIn: (message: string) => Promise<`0x${string}`>;
   authorizeArc: (intent: ArcPaymentIntent) => Promise<ArcAuthorization> };
-export type AccountListener = (account: WalletAccount | null) => void;
+export type AccountListener = (account: WalletAccount | null, reason?: "connection" | "identity") => void;
+export class WalletSessionUnavailableError extends Error {
+  readonly code = "WALLET_SESSION_UNAVAILABLE";
+  constructor(readonly reason: "missing" | "expired" | "changed" | "disconnected" = "disconnected") {
+    super(`Wallet session ${reason === "changed" ? "changed" : reason === "expired" ? "expired" : "is unavailable"}. Reconnect your wallet on Arc Mainnet.`);
+    this.name = "WalletSessionUnavailableError";
+  }
+}
 const abortError = () => new DOMException("Connection cancelled", "AbortError");
 export function parseChainId(value: unknown): number {
   const parsed = z.union([z.number(), z.string().regex(/^(0x[0-9a-f]+|[1-9][0-9]*)$/i)]).parse(value);
@@ -33,27 +40,53 @@ export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortS
   const { provider } = wallet;
   if (!restoreAddress) await abortable(provider.request({ method: "eth_requestAccounts" }), signal);
   let active = true, revision = 0;
+  let pendingIdentityChange = false;
   let account: WalletAccount | null = null;
   const stop = () => {
     if (!active) return;
     active = false; revision++;
-    provider.removeListener("accountsChanged", refreshEvent);
-    provider.removeListener("chainChanged", refreshEvent);
+    provider.removeListener("accountsChanged", accountsChanged);
+    provider.removeListener("chainChanged", chainChanged);
     provider.removeListener("disconnect", disconnected);
   };
-  const disconnected = () => { stop(); changed(null); };
+  const drop = (reason?: "identity") => { if (!active) return; stop(); if (reason) changed(null, reason); else changed(null); };
+  const disconnected = () => drop();
   async function refresh() {
     const current = ++revision;
     const [rawAccounts, rawChain] = await Promise.all([provider.request({ method: "eth_accounts" }), provider.request({ method: "eth_chainId" })]);
     if (!active || current !== revision) return;
     const selected = addresses.parse(rawAccounts)[0];
-    if (!selected) { disconnected(); return; }
-    account = { address: selected, chainId: parseChainId(rawChain), name: wallet.name, transport: "browser" };
-    changed(account);
+    if (!selected) { drop(pendingIdentityChange ? "identity" : undefined); return; }
+    const next = { address: selected, chainId: parseChainId(rawChain), name: wallet.name, transport: "browser" as const };
+    const identityChanged = pendingIdentityChange || (account && (account.address.toLowerCase() !== next.address.toLowerCase() || account.chainId !== next.chainId));
+    account = next;
+    pendingIdentityChange = false;
+    if (identityChanged) changed(account, "identity"); else changed(account);
   }
-  function refreshEvent() { void refresh().catch(disconnected); }
-  provider.on("accountsChanged", refreshEvent);
-  provider.on("chainChanged", refreshEvent);
+  function refreshEvent() {
+    const current = revision + 1, identityChanged = pendingIdentityChange;
+    void refresh().catch(() => { if (active && current === revision) drop(identityChanged ? "identity" : undefined); });
+  }
+  function reportIdentity(next: WalletAccount) {
+    pendingIdentityChange = true; revision++; account = next; changed(next, "identity");
+  }
+  function accountsChanged(value: unknown) {
+    if (!active) return;
+    const parsed = addresses.safeParse(value);
+    if (parsed.success && !parsed.data.length) { drop(); return; }
+    const selected = parsed.success ? parsed.data[0] : undefined;
+    if (account && selected && account.address.toLowerCase() !== selected.toLowerCase()) reportIdentity({ ...account, address: selected });
+    refreshEvent();
+  }
+  function chainChanged(value: unknown) {
+    if (!active) return;
+    let chain: number | undefined;
+    try { chain = parseChainId(value); } catch { /* Read the provider if its event payload is malformed. */ }
+    if (account && chain !== undefined && account.chainId !== chain) reportIdentity({ ...account, chainId: chain });
+    refreshEvent();
+  }
+  provider.on("accountsChanged", accountsChanged);
+  provider.on("chainChanged", chainChanged);
   provider.on("disconnect", disconnected);
   signal.addEventListener("abort", stop, { once: true });
   try {
@@ -61,7 +94,8 @@ export async function connectBrowserWallet(wallet: BrowserWallet, signal: AbortS
     if (signal.aborted) throw abortError();
     if (!account) throw new Error("Wallet has no available account");
     if (restoreAddress && (account as WalletAccount).address.toLowerCase() !== restoreAddress.toLowerCase()) throw Error("Selected wallet changed");
-    return { detach: stop, get account() { if (!account) throw Error("Wallet disconnected"); return account; },
+    const assertActive = () => { if (!active || !account) throw new WalletSessionUnavailableError(); };
+    return { detach: stop, assertActive, get account() { assertActive(); return account!; },
       signIn: async message => {
         const before = revision, payer = account?.address;
         const check = async () => {
@@ -121,14 +155,30 @@ async function loadClient(projectId: string): Promise<SignClient> {
   return clientPromise;
 }
 
+const sessionSchema = z.object({ expiry: z.number().finite(), peer: z.object({ metadata: z.object({ name: z.string().min(1).max(80) }) }),
+  namespaces: z.record(z.object({ accounts: z.array(z.string()), methods: z.array(z.string()) })) });
+function sessionNamespace(session: z.infer<typeof sessionSchema>, chainId: number) {
+  return session.namespaces[`eip155:${chainId}`] ?? session.namespaces["eip155"];
+}
 export function accountFromSession(session: unknown, chainId: number): WalletAccount {
-  const parsed = z.object({ expiry: z.number(), peer: z.object({ metadata: z.object({ name: z.string().min(1).max(80) }) }),
-    namespaces: z.record(z.object({ accounts: z.array(z.string()), methods: z.array(z.string()) })) }).parse(session);
+  parseChainId(chainId);
+  const parsed = sessionSchema.parse(session);
   if (parsed.expiry <= Date.now() / 1000) throw new Error("Wallet session expired");
-  const namespace = parsed.namespaces["eip155"] ?? parsed.namespaces[`eip155:${chainId}`];
-  const selected = namespace?.accounts.find(value => value.startsWith(`eip155:${chainId}:`));
+  const namespace = sessionNamespace(parsed, chainId);
+  const selected = namespace?.accounts.find(value => new RegExp(`^eip155:${chainId}:0x[a-fA-F0-9]{40}$`).test(value));
   if (!selected || !namespace?.methods.includes("eth_signTypedData_v4")) throw new Error("Required wallet capabilities not approved");
   return { address: address.parse(selected.split(":")[2]), chainId, name: parsed.peer.metadata.name, transport: "walletconnect" };
+}
+
+function unavailableRequest(error: unknown): WalletSessionUnavailableError | null {
+  const message = typeof error === "string" ? error : error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message : "";
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  if (code === 6000) return new WalletSessionUnavailableError();
+  if (typeof code === "number" && [5100, 5101, 5102, 5103, 5104].includes(code)) return new WalletSessionUnavailableError("changed");
+  if (/\b(?:session|topic)\b/i.test(message) && /(?:no (?:existing |matching )?session|no matching key|does(?:n't| not) exist|not found|missing|expired|deleted)/i.test(message)) {
+    return new WalletSessionUnavailableError(/expired/i.test(message) ? "expired" : "missing");
+  }
+  return null;
 }
 
 export async function connectWalletConnect(projectId: string, chainId: number, signal: AbortSignal, showUri: (uri: string) => void, changed: AccountListener,
@@ -155,39 +205,134 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     if (signal.aborted) { cancelPairing(); throw abortError(); }
     if (proposal.uri) showUri(proposal.uri);
     const session = await abortable(approval, signal);
-    const account = accountFromSession(session, chainId);
+    const topic = z.string().min(1).max(256).parse(session.topic);
+    const initial = client.session.get(topic);
+    const account = accountFromSession(initial, chainId);
+    const approvalScope = (value: unknown) => {
+      const namespace = sessionNamespace(sessionSchema.parse(value), chainId);
+      return JSON.stringify({ accounts: namespace?.accounts.map(value => value.toLowerCase()).sort(), methods: namespace?.methods.slice().sort() });
+    };
+    const approvedScope = approvalScope(initial);
     if (restore && account.address.toLowerCase() !== restore.address.toLowerCase()) throw Error("Selected wallet changed");
     if (signal.aborted) throw abortError();
     let active = true;
+    let unavailable = new WalletSessionUnavailableError();
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    const pendingRequests = new Set<(error: WalletSessionUnavailableError) => void>();
     const cleanup = () => {
+      if (!active) return;
       active = false;
       clearTimeout(expiryTimer);
-      client.off("session_delete", dropped); client.off("session_expire", dropped);
+      client.off("session_delete", dropped); client.off("session_expire", expired);
       client.off("session_update", updated); client.off("session_event", updated);
+      for (const reject of pendingRequests) reject(unavailable);
+      pendingRequests.clear();
+    };
+    const invalidate = (error: WalletSessionUnavailableError) => {
+      if (!active) return;
+      unavailable = error;
+      cleanup();
+      if (error.reason === "changed") changed(null, "identity"); else changed(null);
+    };
+    const check = (method?: string) => {
+      if (!active) throw unavailable;
+      let fresh;
+      try { fresh = client.session.get(topic); }
+      catch (cause) { const error = unavailableRequest(cause) ?? new WalletSessionUnavailableError("missing"); invalidate(error); throw error; }
+      try {
+        if (fresh.topic !== topic) throw new WalletSessionUnavailableError("missing");
+        if (fresh.expiry <= Date.now() / 1000) throw new WalletSessionUnavailableError("expired");
+        const current = accountFromSession(fresh, chainId);
+        if (current.address.toLowerCase() !== account.address.toLowerCase()
+          || approvalScope(fresh) !== approvedScope
+          || (method && !sessionNamespace(sessionSchema.parse(fresh), chainId)?.methods.includes(method))) throw new WalletSessionUnavailableError("changed");
+        return fresh;
+      } catch (cause) {
+        const error = cause instanceof WalletSessionUnavailableError ? cause : new WalletSessionUnavailableError("changed");
+        invalidate(error); throw error;
+      }
     };
     const disconnect = async () => {
       if (!active) return;
-      cleanup(); changed(null);
-      await client.disconnect({ topic: session.topic, reason });
+      invalidate(new WalletSessionUnavailableError());
+      // A locally missing session is already disconnected. Do not let SDK cleanup
+      // failures turn lifecycle callbacks into unhandled promise rejections.
+      await client.disconnect({ topic, reason }).catch(() => {});
     };
-    const dropped = (event: { topic: string }) => { if (active && event.topic === session.topic) { cleanup(); changed(null); } };
-    // A changed approval needs an explicit reconnection; never keep a stale payment identity.
-    const updated = (event: { topic: string }) => { if (active && event.topic === session.topic) void disconnect().catch(() => {}); };
-    const expiryTimer = setTimeout(() => { void disconnect().catch(() => {}); }, Math.min(2_147_483_647, Math.max(0, session.expiry * 1000 - Date.now())));
-    client.on("session_delete", dropped); client.on("session_expire", dropped);
+    const dropped = (event: { topic: string }) => { if (event.topic === topic) invalidate(new WalletSessionUnavailableError("missing")); };
+    const expired = (event: { topic: string }) => { if (event.topic === topic) invalidate(new WalletSessionUnavailableError("expired")); };
+    // Keep valid same-identity updates active. Only a proven account, chain or
+    // capability change invalidates the authenticated request's identity.
+    const updated = (event: { topic: string; params?: { namespaces?: unknown; chainId?: unknown; event?: { name: string; data: unknown } } }) => {
+      if (active && event.topic === topic) {
+        let changeReason: WalletSessionUnavailableError["reason"] | undefined;
+        try {
+          const fresh = check(), params = event.params;
+          if (params?.namespaces !== undefined) {
+            try {
+              const proposed = { ...fresh, namespaces: params.namespaces };
+              if (accountFromSession(proposed, chainId).address.toLowerCase() !== account.address.toLowerCase() || approvalScope(proposed) !== approvedScope) changeReason = "changed";
+            } catch { changeReason = "changed"; }
+          }
+          if (typeof params?.chainId === "string" && /^eip155:[1-9][0-9]*$/.test(params.chainId) && params.chainId !== `eip155:${chainId}`) changeReason = "changed";
+          if (params?.event?.name === "accountsChanged") {
+            const accounts = addresses.safeParse(params.event.data);
+            if (accounts.success) {
+              if (!accounts.data.length && changeReason !== "changed") changeReason = "missing";
+              else if (accounts.data[0] && accounts.data[0].toLowerCase() !== account.address.toLowerCase()) changeReason = "changed";
+            }
+          }
+          if (params?.event?.name === "chainChanged") {
+            let chain: number | undefined;
+            try { chain = parseChainId(params.event.data); } catch { /* The fresh approved scope remains authoritative. */ }
+            if (chain !== undefined && chain !== chainId) changeReason = "changed";
+          }
+        } catch {
+          // The fresh session check already notified the UI. Close any remaining
+          // SDK session without allowing a missing-topic cleanup error to escape.
+          void client.disconnect({ topic, reason }).catch(() => {}); return;
+        }
+        if (!changeReason) return;
+        invalidate(new WalletSessionUnavailableError(changeReason));
+        void client.disconnect({ topic, reason }).catch(() => {});
+      }
+    };
+    const scheduleExpiry = () => {
+      const fresh = check();
+      expiryTimer = setTimeout(() => { try { scheduleExpiry(); } catch { /* check already invalidated the connection. */ } }, Math.min(2_147_483_647, Math.max(0, fresh.expiry * 1000 - Date.now())));
+    };
+    const request = (args: { method: string; params: unknown[] }): Promise<unknown> => {
+      check(args.method);
+      return new Promise((resolve, reject) => {
+        pendingRequests.add(reject);
+        const failed = (cause: unknown) => {
+          pendingRequests.delete(reject);
+          const error = unavailableRequest(cause);
+          if (error) { invalidate(error); reject(error); return; }
+          try { check(args.method); reject(cause); } catch (error) { reject(error); }
+        };
+        try {
+          void client.request({ topic, chainId: `eip155:${arc.chainId}`, request: args }).then(value => {
+            pendingRequests.delete(reject);
+            try { check(args.method); resolve(value); } catch (error) { reject(error); }
+          }, failed).catch(reject);
+        } catch (error) { failed(error); }
+      });
+    };
+    client.on("session_delete", dropped); client.on("session_expire", expired);
     client.on("session_update", updated); client.on("session_event", updated);
+    scheduleExpiry();
     changed(account);
-    return { account, disconnect, detach: cleanup, topic: session.topic, signIn: async message => {
-      const check = () => { if (!active || chainId !== arc.chainId || session.expiry <= Date.now() / 1000) throw Error("Reconnect your wallet on Arc Mainnet"); };
-      check();
-      const namespace = session.namespaces["eip155"] ?? session.namespaces[`eip155:${chainId}`];
-      if (!namespace?.methods.includes("personal_sign")) throw Error("Reconnect and approve wallet login capability");
-      const signature = await signLoginMessage(message, account.address, request => client.request({ topic: session.topic, chainId: `eip155:${arc.chainId}`, request }));
-      check(); return signature;
+    return { assertActive: () => { check(); }, get account() { check(); return account; }, disconnect, detach: cleanup, topic, signIn: async message => {
+      check("personal_sign");
+      if (chainId !== arc.chainId) throw Error("Reconnect your wallet on Arc Mainnet");
+      const signature = await signLoginMessage(message, account.address, request);
+      check("personal_sign"); return signature;
     }, authorizeArc: async intent => {
-      if (!active || chainId !== arc.chainId || account.address.toLowerCase() !== intent.payer.toLowerCase() || session.expiry <= Date.now() / 1000) throw Error("Reconnect the payer wallet on Arc Mainnet");
-      const result = await signArcPayment(intent, request => client.request({ topic: session.topic, chainId: `eip155:${arc.chainId}`, request }));
-      if (!active || session.expiry <= Date.now() / 1000) throw Error("Wallet changed during payment approval");
+      check("eth_signTypedData_v4");
+      if (chainId !== arc.chainId || account.address.toLowerCase() !== intent.payer.toLowerCase()) throw Error("Reconnect the payer wallet on Arc Mainnet");
+      const result = await signArcPayment(intent, request);
+      check("eth_signTypedData_v4");
       return result;
     } };
   } catch (error) {
