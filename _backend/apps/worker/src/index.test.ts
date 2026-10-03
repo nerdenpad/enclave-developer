@@ -33,6 +33,8 @@ beforeEach(() => {
   vi.stubEnv("ARC_CHAIN_ID", "5042002");
   vi.stubEnv("CHAIN_CONFIRMATIONS", undefined);
   vi.stubEnv("CHAIN_DEPLOYMENT_ID", undefined);
+  vi.stubEnv("CHAIN_INDEXER_POLL_MS", undefined);
+  vi.stubEnv("INDEXER_RPC_MAX_RPS", undefined);
   vi.stubEnv("ATTESTATION_VERIFIER_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3");
   vi.stubEnv("DEPLOYER_PRIVATE_KEY", `0x${"12".repeat(32)}`);
   runtime.drain.mockResolvedValue(undefined);
@@ -118,5 +120,17 @@ describe("worker startup and process signals", () => {
     await import("./index.js");
     expect(runtime.indexer).toHaveBeenCalledWith(expect.objectContaining({ confirmations: 0 }));
     expect(runtime.signerRecovery).toHaveBeenCalledWith(expect.objectContaining({ confirmations: 0 }));
+  });
+  it("forwards the operator indexer polling and RPC budgets", async () => {
+    vi.stubEnv("CHAIN_INDEXER_POLL_MS", "10000");
+    vi.stubEnv("INDEXER_RPC_MAX_RPS", "3");
+    await import("./index.js");
+    expect(runtime.indexer).toHaveBeenCalledWith(expect.objectContaining({ pollMs: 10_000, rpcMaxRps: 3, confirmations: 12 }));
+  });
+  it.each([["CHAIN_INDEXER_POLL_MS", "999"], ["CHAIN_INDEXER_POLL_MS", "300001"],
+    ["INDEXER_RPC_MAX_RPS", "0"], ["INDEXER_RPC_MAX_RPS", "11"]])("rejects invalid %s=%s before opening workers", async (name, value) => {
+    vi.stubEnv(name, value);
+    await expect(import("./index.js")).rejects.toThrow();
+    expect(runtime.workerFactory).not.toHaveBeenCalled();
   });
 });

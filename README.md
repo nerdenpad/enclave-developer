@@ -14,10 +14,13 @@ verification and payment status are checked separately on the
 
 > ### Release status
 >
-> Arc contracts are deployed and the API supports authorized settlement on chain
-> `5042`. Public browser checkout remains disabled pending an accepted hosted
-> inference and payment journey. See [payment launch](docs/payment-launch.md) and
-> the [roadmap](docs/roadmap.md).
+> NEAR + Arc production inference is deployed with CPU/GPU evidence checks and
+> signed receipts. Public checkout is enabled at **0.10 USDC per request**.
+> Manual wallet acceptance: passed, confirmed by the project owner on 3 October 2026.
+> Remaining live failure acceptance keeps the full E1 launch open.
+> See [deployment status](https://enclaveagent.tech/status),
+> [acceptance evidence](docs/release-progress.md) and
+> [remaining E1 checks](docs/e1-release.md).
 
 ## Links
 
@@ -73,8 +76,9 @@ A clean checkout starts with a local echo provider and test payments. Startup do
 make a paid inference request. See the [development guide](docs/development.md) for NEAR,
 local services and integration checks.
 
-Connecting a wallet does not enable real-USDC payments and does not replace workspace
-authentication. See [wallet setup and payment scope](docs/wallet-payments.md).
+Connect a wallet, then use **Sign in with connected wallet** to access its workspace.
+Connection and login do not authorize a payment. See
+[wallet setup and payment scope](docs/wallet-payments.md).
 
 ```sh
 npm run typecheck

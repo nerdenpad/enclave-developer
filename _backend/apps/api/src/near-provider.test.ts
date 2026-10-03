@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { once } from "node:events";
 import type { PeerCertificate } from "node:tls";
-import { checkNearCertificate, createNearAttestationVerifier, nearBaseUrl, peerSpkiSha256, runNearVerifier } from "./near-provider.js";
-import type { NearVerifiedSession } from "@enclave/core";
+import { checkNearCertificate, createNearAttestationVerifier, nearBaseUrl, nvidiaVerifierOptions, peerSpkiSha256, runNearVerifier } from "./near-provider.js";
+import { AppError, type NearVerifiedSession } from "@enclave/core";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -79,6 +79,7 @@ const policy = JSON.parse(await readFile(path, 'utf8'));
 let input = ''; for await (const chunk of process.stdin) input += chunk;
 const data = JSON.parse(input);
 if (policy.mode === 'reject') { process.stderr.write('private-verifier-diagnostic'); process.stdout.write('private-verifier-diagnostic'); process.exit(7); }
+if (policy.mode === 'fixed-error') { process.stderr.write('private-verifier-diagnostic'); process.stdout.write(JSON.stringify({ok:false,error:policy.errorCode,report:'private-raw-report',nonce:'private-nonce',token:'private-token'})); process.exit(policy.exitCode ?? 1); }
 if (policy.mode === 'invalid-json') { process.stdout.write('private-invalid-output'); process.exit(0); }
 if (policy.mode === 'oversize') { process.stdout.write('x'.repeat(2097153)); process.exitCode = 0; }
 else if (policy.mode === 'hang') { setInterval(() => {}, 1000); }
@@ -258,7 +259,8 @@ describe("NEAR transport trust boundaries", () => {
     const closed = sockets.map((socket) => once(socket, "close"));
     server.closeAllConnections();
     await Promise.all(closed);
-    await expect(verified.fetch(new URL(`${baseUrl}/chat/completions`), { method: "POST", body: "must never arrive" })).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    await expect(verified.fetch(new URL(`${baseUrl}/chat/completions`), { method: "POST", body: "must never arrive" })).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED",
+      details: { attestationFailure: { stage: "transport", reason: "tls" } } });
     expect(calls).toHaveLength(1);
   });
 
@@ -266,6 +268,16 @@ describe("NEAR transport trust boundaries", () => {
     const verified = await session();
     await expect(verified.fetch(new URL("https://attacker.example/completions"), { method: "POST", body: "private" })).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
     await expect(verified.fetch(new URL(`${baseUrl}/chat/completions`), { method: "POST", body: new Uint8Array([1]) })).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("redacts synchronous header errors before a pinned request sends bytes", async () => {
+    const verified = await session();
+    const error = await verified.fetch(new URL(`${baseUrl}/chat/completions`), { method: "POST", headers: { authorization: "private-token\ninvalid" }, body: "private" })
+      .catch((caught: unknown) => caught);
+    expect((error as AppError).details).toEqual({ attestationFailure: { stage: "transport", reason: "request" } });
+    expect(JSON.stringify(error)).not.toContain("private-token");
+    expect(String(error)).not.toContain("private-token");
     expect(calls).toHaveLength(1);
   });
 
@@ -300,7 +312,8 @@ describe("NEAR transport trust boundaries", () => {
   it.each([{ model_name: "Other/Model" }, { request_nonce: "bad" }, { tls_cert_fingerprint: hash32 }, { tls_cert_fingerprint: null }])("rejects report binding mismatch %#", async (changes) => {
     reportChanges = changes;
     const spawn = vi.mocked(childProcess.spawn);
-    await expect(session()).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    const reason = "model_name" in changes ? "model-binding" : "request_nonce" in changes ? "nonce-binding" : changes.tls_cert_fingerprint === null ? "shape" : "tls-binding";
+    await expect(session()).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", details: { attestationFailure: { stage: "report", reason } } });
     expect(spawn).not.toHaveBeenCalled();
     expect(calls).toHaveLength(1);
   });
@@ -344,14 +357,67 @@ describe("NEAR transport trust boundaries", () => {
   it("refuses a bootstrap redirect without sending credentials or invoking the verifier", async () => {
     requestHook = (_req, res) => { res.writeHead(303, { location: "https://attacker.example/report" }); res.end(); return true; };
     const spawn = vi.mocked(childProcess.spawn);
-    await expect(session()).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    await expect(session()).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", details: { attestationFailure: { stage: "report", reason: "http-status" } } });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.authorization).toBeUndefined();
     expect(spawn).not.toHaveBeenCalled();
   });
+
+  it.each([{ body: "private-invalid-report", reason: "json" }, { body: "null", reason: "shape" }, { body: "[]", reason: "shape" }])(
+    "exposes only a fixed report diagnostic for $reason", async ({ body, reason }) => {
+      requestHook = (_req, res) => { res.end(body); return true; };
+      const error = await session().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503,
+        details: { attestationFailure: { stage: "report", reason } } });
+      expect(JSON.stringify(error)).not.toContain(body);
+      expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+    });
+
+  it("does not preserve caller-provided AppError details through the outer catch", async () => {
+    vi.mocked(https.request).mockImplementationOnce(() => { throw new AppError("INFERENCE_ATTESTATION_FAILED", "private injected message", 503,
+      { attestationFailure: { stage: "private injected stage", reason: "private injected reason" }, rawReport: "private injected report" }); });
+    const error = await session().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503,
+      details: { attestationFailure: { stage: "transport", reason: "request" } } });
+    expect(JSON.stringify(error)).not.toContain("private injected");
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
 });
 
 describe("isolated hardware verifier process protocol", () => {
+  it("does not inherit ambient NVIDIA mode or artifact settings", async () => {
+    vi.stubEnv("NVIDIA_VERIFIER_MODE", "local");
+    vi.stubEnv("NVIDIA_NVAT_BINARY", "/unreviewed/nvattest");
+    vi.stubEnv("NVIDIA_NVAT_LIBRARY", "/unreviewed/libnvat.so");
+    await runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000));
+    const env = vi.mocked(childProcess.spawn).mock.calls[0]![2]!.env!;
+    expect(env.NVIDIA_VERIFIER_MODE).toBeUndefined();
+    expect(env.NVIDIA_NVAT_BINARY).toBeUndefined();
+    expect(env.NVIDIA_NVAT_LIBRARY).toBeUndefined();
+  });
+
+  it("passes only explicit local NVIDIA artifact paths without inference credentials", async () => {
+    vi.stubEnv("INFERENCE_API_KEY", "fixture-secret-token");
+    const nvidiaLocal = { binaryPath: "/reviewed/bin/nvattest", libraryPath: "/reviewed/lib/libnvat.so" };
+    await runNearVerifier({ ...runtime(), nvidiaLocal }, publicInput(), AbortSignal.timeout(5_000));
+    const env = vi.mocked(childProcess.spawn).mock.calls[0]![2]!.env!;
+    expect(env).toMatchObject({ NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: nvidiaLocal.binaryPath, NVIDIA_NVAT_LIBRARY: nvidiaLocal.libraryPath });
+    expect(env.INFERENCE_API_KEY).toBeUndefined();
+    expect(env.LD_PRELOAD).toBeUndefined();
+  });
+
+  it.each([
+    { NVIDIA_VERIFIER_MODE: "local" },
+    { NVIDIA_VERIFIER_MODE: "nras", NVIDIA_NVAT_BINARY: "/unreviewed/nvattest" },
+    { NVIDIA_VERIFIER_MODE: "auto" },
+    { NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: "relative/nvattest", NVIDIA_NVAT_LIBRARY: "/reviewed/libnvat.so" },
+    { NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: "/reviewed/shared", NVIDIA_NVAT_LIBRARY: "/reviewed/shared" },
+    { NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: "/reviewed/bin/nvattest", NVIDIA_NVAT_LIBRARY: "/reviewed/one:two/libnvat.so" },
+    { NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: "/reviewed/bin/nvattest", NVIDIA_NVAT_LIBRARY: "/reviewed/$ORIGIN/libnvat.so" },
+  ])("rejects implicit or incomplete NVIDIA verifier configuration %#", options => {
+    expect(() => nvidiaVerifierOptions(options)).toThrow();
+  });
+
   it("passes only public evidence and a minimal environment, preserving verifier audit fields", async () => {
     vi.stubEnv("INFERENCE_API_KEY", "fixture-secret-token");
     vi.stubEnv("DEPLOYER_PRIVATE_KEY", "fixture-chain-secret");
@@ -371,8 +437,34 @@ describe("isolated hardware verifier process protocol", () => {
     await writeFile(policyPath, JSON.stringify({ mode }));
     const error: unknown = await runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000)).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503 });
+    expect(error).toMatchObject({ details: { attestationFailure: { stage: "verifier", reason:
+      mode === "reject" ? "process-failed" : mode === "oversize" ? "output-limit" : "invalid-output" } } });
     expect(String(error)).not.toContain("private-verifier-diagnostic");
     expect(String(error)).not.toContain("private-invalid-output");
+  });
+
+  it.each(["CPU_TCB_REJECTED", "WORKLOAD_NOT_APPROVED", "NVIDIA_LOCAL_TIMEOUT", "ARCHIVE_VERDICT_MISMATCH"])(
+    "preserves only allowlisted verifier code %s through session failure", async errorCode => {
+      await writeFile(policyPath, JSON.stringify({ mode: "fixed-error", errorCode }));
+      const error = await session().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503 });
+      expect((error as AppError).details).toEqual({ attestationFailure: { stage: "verifier", reason: "rejected", verifierError: errorCode } });
+      expect(JSON.stringify(error)).not.toContain("private-");
+    });
+
+  it.each(["NVIDIA_PRIVATE_SECRET", "CPU_TCB_REJECTED\nprivate-token", { token: "private-token" }])(
+    "does not copy unknown or malformed verifier error fields %#", async errorCode => {
+      await writeFile(policyPath, JSON.stringify({ mode: "fixed-error", errorCode }));
+      const error = await runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000)).catch((caught: unknown) => caught);
+      expect((error as AppError).details).toEqual({ attestationFailure: { stage: "verifier", reason: "process-failed" } });
+      expect(JSON.stringify(error)).not.toContain("private");
+      expect(JSON.stringify(error)).not.toContain("NVIDIA_PRIVATE_SECRET");
+    });
+
+  it("rejects a fixed failure verdict even when the process incorrectly exits zero", async () => {
+    await writeFile(policyPath, JSON.stringify({ mode: "fixed-error", errorCode: "CPU_TCB_REJECTED", exitCode: 0 }));
+    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000))).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED",
+      details: { attestationFailure: { stage: "verifier", reason: "rejected", verifierError: "CPU_TCB_REJECTED" } } });
   });
 
   it.each([{ cloud: true, flag: "--cloud-archive" }, { cloud: false, flag: "--direct-archive" }])(
@@ -401,15 +493,32 @@ describe("isolated hardware verifier process protocol", () => {
 
   it("aborts an unresponsive verifier within the caller deadline", async () => {
     await writeFile(policyPath, JSON.stringify({ mode: "hang" }));
-    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(300))).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(300))).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED",
+      details: { attestationFailure: { stage: "verifier", reason: "aborted" } } });
   });
 
   it("does not spawn after cancellation and redacts missing executable failures", async () => {
     const spawn = vi.mocked(childProcess.spawn);
-    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.abort())).rejects.toThrow();
+    await expect(runNearVerifier(runtime(), publicInput(), AbortSignal.abort())).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED",
+      details: { attestationFailure: { stage: "verifier", reason: "aborted" } } });
     expect(spawn).not.toHaveBeenCalled();
     await expect(runNearVerifier({ ...runtime(), pythonPath: join(fixtureDir, "missing-python") }, publicInput(), AbortSignal.timeout(5_000)))
-      .rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+      .rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", details: { attestationFailure: { stage: "verifier", reason: "process-failed" } } });
+  });
+
+  it("redacts invalid input before starting a verifier process", async () => {
+    const input: { private: unknown } = { private: null }; input.private = input;
+    await expect(runNearVerifier(runtime(), input, AbortSignal.timeout(5_000))).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED",
+      details: { attestationFailure: { stage: "verifier", reason: "invalid-input" } } });
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
+
+  it("redacts a synchronous spawn failure without copying caller details", async () => {
+    vi.mocked(childProcess.spawn).mockImplementationOnce(() => { throw new AppError("PRIVATE_CODE", "private spawn message", 500, { raw: "private spawn details" }); });
+    const error = await runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000)).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503 });
+    expect((error as AppError).details).toEqual({ attestationFailure: { stage: "verifier", reason: "process-failed" } });
+    expect(JSON.stringify(error)).not.toContain("private spawn");
   });
 
   it("detects an oversized or unreadable policy before trusting a verifier result", async () => {

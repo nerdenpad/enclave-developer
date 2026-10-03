@@ -4,7 +4,7 @@ import { eq, getTableName } from "drizzle-orm";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { privateKeyToAccount } from "viem/accounts";
-import { apiKeys, idempotencyKeys, models, payments, receipts, sessions, usage, schema, tcbPolicy } from "@enclave/db";
+import { apiKeys, idempotencyKeys, inferenceExecutions, models, payments, receipts, sessions, usage, schema, tcbPolicy } from "@enclave/db";
 import * as core from "@enclave/core";
 import { EnclaveGateway } from "./gateway.js";
 import { loadConfig, type Config } from "./config.js";
@@ -125,14 +125,20 @@ describe("private provider evidence through Postgres gateway", () => {
     expect((await db.select().from(usage).where(eq(usage.keyHash, keyHash)))[0]!.calls).toBe(1);
   });
 
-  it("rolls back consumption and receipt creation when hardware verification fails", async () => {
+  it("rolls back consumption and receipt creation but quarantines the dispatch when hardware verification fails", async () => {
     const input = await paidInput();
     infer.mockRejectedValueOnce(new core.AppError("INFERENCE_ATTESTATION_FAILED", "Hardware rejected", 503));
-    await expect(gateway.infer(input)).rejects.toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED" });
+    await expect(gateway.infer(input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN", details: { paymentId: input.paymentId } });
     expect((await db.select().from(payments).where(eq(payments.id, input.paymentId)))[0]!.status).toBe("settled");
     expect(await db.select().from(receipts).where(eq(receipts.keyHash, keyHash))).toHaveLength(0);
     expect(await db.select().from(usage).where(eq(usage.keyHash, keyHash))).toHaveLength(0);
     expect(await db.select().from(idempotencyKeys).where(eq(idempotencyKeys.keyHash, keyHash))).toHaveLength(0);
+    expect(await db.select().from(inferenceExecutions).where(eq(inferenceExecutions.paymentId, input.paymentId))).toEqual([
+      expect.objectContaining({ status: "dispatched", requestHash: expect.any(String), receiptHash: null }),
+    ]);
+    const restarted = await EnclaveGateway.boot(db, config, log, undefined);
+    await expect(restarted.infer(input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
+    expect(infer).toHaveBeenCalledOnce();
   });
 
   it("discards an in-flight provider result when its serving model is revoked", async () => {
@@ -141,8 +147,31 @@ describe("private provider evidence through Postgres gateway", () => {
       await db.update(models).set({ approved: false }).where(eq(models.id, modelId));
       return signedResult(bytes);
     });
-    await expect(gateway.infer(input)).rejects.toMatchObject({ code: "MODEL_NOT_APPROVED" });
+    await expect(gateway.infer(input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
     expect((await db.select().from(payments).where(eq(payments.id, input.paymentId)))[0]!.status).toBe("settled");
     expect(await db.select().from(receipts).where(eq(receipts.keyHash, keyHash))).toHaveLength(0);
+    await db.update(models).set({ approved: true }).where(eq(models.id, modelId));
+    const restarted = await EnclaveGateway.boot(db, config, log, undefined);
+    await expect(restarted.infer(input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
+    expect(infer).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the dispatch claim when the entire result transaction rolls back after remote execution", async () => {
+    const input = await paidInput();
+    const original = db.transaction.bind(db);
+    const fault = vi.spyOn(db, "transaction").mockImplementation(((operation: Parameters<typeof original>[0]) => original(async (tx) => {
+      const result = await operation(tx);
+      if (infer.mock.calls.length > 0) throw new Error("Injected publication failure after remote execution");
+      return result;
+    })) as typeof db.transaction);
+    try { await expect(gateway.infer(input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" }); }
+    finally { fault.mockRestore(); }
+    expect((await db.select().from(inferenceExecutions).where(eq(inferenceExecutions.paymentId, input.paymentId)))[0]?.status).toBe("dispatched");
+    expect((await db.select().from(payments).where(eq(payments.id, input.paymentId)))[0]?.status).toBe("settled");
+    expect(await db.select().from(receipts).where(eq(receipts.keyHash, keyHash))).toHaveLength(0);
+    expect(await db.select().from(idempotencyKeys).where(eq(idempotencyKeys.keyHash, keyHash))).toHaveLength(0);
+    const restarted = await EnclaveGateway.boot(db, config, log, undefined);
+    await expect(restarted.infer(input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
+    expect(infer).toHaveBeenCalledOnce();
   });
 });

@@ -25,6 +25,8 @@ const env = z.object({
   ARC_CHAIN_ID: z.coerce.number().int().positive().default(31337),
   CHAIN_CONFIRMATIONS: z.coerce.number().int().min(0).max(1000).optional(),
   CHAIN_DEPLOYMENT_ID: z.string().min(1).optional(),
+  CHAIN_INDEXER_POLL_MS: z.coerce.number().int().min(1000).max(300_000).optional(),
+  INDEXER_RPC_MAX_RPS: z.coerce.number().int().min(1).max(10).optional(),
   DEPLOYER_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/)
     .default("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
     .transform((value): `0x${string}` => `0x${value.slice(2)}`),
@@ -63,6 +65,8 @@ const tasks = [
     registry: env.MODEL_REGISTRY_ADDRESS,
     confirmations,
     ...(env.CHAIN_DEPLOYMENT_ID ? { deploymentId: env.CHAIN_DEPLOYMENT_ID } : {}),
+    ...(env.CHAIN_INDEXER_POLL_MS === undefined ? {} : { pollMs: env.CHAIN_INDEXER_POLL_MS }),
+    ...(env.INDEXER_RPC_MAX_RPS === undefined ? {} : { rpcMaxRps: env.INDEXER_RPC_MAX_RPS }),
     log,
   }),
   startAttestRefresher({ db, log }),

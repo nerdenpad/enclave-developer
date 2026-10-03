@@ -6,6 +6,17 @@ The selected route is **experimental direct NEAR**: `NEAR_ENDPOINT_PROFILE=direc
 
 ## Prepare acceptance
 
+GPU verification is also explicit. The default `NVIDIA_VERIFIER_MODE=nras` checks
+NVIDIA-signed results. The Linux `local` profile requires the pinned NVAT 1.2.2
+binary and library, matching `nvidiaVerifier` fields in the reviewed provider
+policy, and access to official signed RIM/OCSP collateral. It independently
+verifies the original raw GPU reports; it never treats a local EAT as
+NVIDIA-issued proof. Archive replay re-appraises those reports against current
+collateral and preserves the original signed transcript commitments. It does
+not claim offline historical OCSP verification. See
+[local verifier configuration](../_backend/infra/near/README.md#local-nvidia-verification).
+Changing verifier profiles requires a new reviewed policy and accepted archive.
+
 1. Review the provider node's complete measurements, immutable image provenance and runtime actions for the exact model and route. Store a versioned policy with reviewed model `profiles`, a bounded validity interval and production review provenance. The Cloud Gateway route additionally requires reviewed `gatewayProfiles`. Compute the SHA-256 of the exact policy file bytes. Never populate approved profiles automatically from an unreviewed response.
 2. Choose the final model identifier, application serving identity and policy version. Register and approve their computed model, code and policy commitments in Arc ModelRegistry. Activate that exact on-chain policy through the existing administrative policy lifecycle while the service remains in pilot mode.
 3. Complete one hosted inference on the selected endpoint with strict provider checks. The direct route requires fresh node CPU/GPU verification, a fresh nonce, CA-validated TLS with the observed peer key bound to the quote, and a response signature from the verified node signer over the exact request and response bodies. Preserve the signed receipt, signed provider proof and private transcript, including the original node report, complete verdict, signed GPU evidence, loaded policy and actual TLS fingerprint. For the cloud route, preserve the Gateway report and all model verdicts instead. Confirm the receipt's canonical Arc anchor.
@@ -20,9 +31,33 @@ npm run check:production-release -- --manifest /absolute/private/path/accepted-r
 
 The offline check validates file hashes, receipt and provider signatures, transcript and input/output bindings, provenance, commitments and dates. Its output explicitly reports that hardware, blockchain and payment acceptance have not been independently established by that command. Private input and output bytes are never printed.
 
+The hosted acceptance runner performs one explicitly authorized wallet-authenticated API request, signs a bounded USDC authorization, and preserves the private evidence in a durable journal. Its default mode is read-only:
+
+```sh
+npm run acceptance:near-arc -- --plan /private/acceptance-plan.json --state /private/acceptance-run/state.json --env /private/operator.env
+```
+
+Add `--execute` for the approved test, `--recover` for read-only recovery, or `--prepare-manifest` to recheck a saved result. A generated manifest remains a review candidate until its recorded facts are accepted. See the [acceptance operator guide](../_backend/scripts/accept-near-arc.md) for the plan, protected storage, payment cap and recovery rules. Browser wallet confirmation and the commercial price are checked separately before public checkout is enabled.
+
 ## Start the accepted profile
 
-Use `.env.near-arc.example` as the configuration template. Keep the actual environment, policy, manifest, transcript and persistent signer files outside Git. Production startup requires all of the following:
+Use `.env.near-arc.example` as the configuration template. Keep the actual environment, policy, manifest, transcript and persistent signer files outside Git.
+
+For the selected GLM-5.3-Flash model, configure `NEAR_ENABLE_THINKING=true`,
+`NEAR_MAX_TOKENS=512` and `INFERENCE_TIMEOUT_MS=180000`. The pinned model chat
+template always opens a thinking block; setting `enable_thinking=false` does
+not disable model thinking and can prevent the serving parser from separating
+reasoning from the final answer. Acceptance must inspect the exact signed
+response for a usable final `message.content` and its termination reason.
+These request controls are committed by the provider request hash, while the
+application serving hashes and hardware allowlist do not separately commit
+the token budget. Retain the prior archive and record a new accepted request
+when changing these controls. The generic thinking setting defaults to false;
+the selected model requires this explicit override. See the
+[pinned model template](https://huggingface.co/zai-org/GLM-5.3-Flash/blob/3f1971b7b5f7a528c9c4ef6212c8785298a8c24a/chat_template.jinja)
+and [model publisher guidance](https://docs.z.ai/guides/vlm/glm-5.3-flash).
+
+Production startup requires all of the following:
 
 - Explicit NEAR endpoint profile, its exact canonical HTTPS endpoint and pinned reviewed provider policy bytes. Direct mode uses only the approved `<model-label>.completions.near.ai/v1` endpoint; it does not silently fall back to the Cloud Gateway.
 - Reviewed acceptance manifest matching runtime configuration and the persistent receipt signer.
@@ -34,3 +69,6 @@ Use `.env.near-arc.example` as the configuration template. Keep the actual envir
 Missing keys cannot be regenerated during production startup. Expired acceptance rejects further admissions. Every inference still performs fresh provider verification; an accepted manifest never bypasses live attestation.
 
 Build the frontend with the agreed public payment configuration only after acceptance. The `/status` page reports the inference route, active release profile, provider policy fingerprint and expiry, payment network and known verification boundaries. Direct mode is labeled **Experimental direct NEAR**, including after acceptance. Production readiness remains a gateway report of validated release checks; this page does not independently prove hardware, transcript or payment acceptance. Gateway key custody remains software-managed.
+
+Policy renewal, interrupted-payment recovery and release rollback are covered in
+[NEAR and Arc operations](near-arc-operations.md).

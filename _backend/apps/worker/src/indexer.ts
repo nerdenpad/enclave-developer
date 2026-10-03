@@ -30,6 +30,7 @@ export type IndexerOpts = {
   deploymentId?: string;
   reorgWindow?: number;
   batchSize?: number;
+  rpcMaxRps?: number;
 };
 type Writer = Pick<Database, "insert" | "update">;
 type Result = { fromBlock: bigint; toBlock: bigint };
@@ -41,8 +42,49 @@ function positiveOption(name: string, value: number, min: number, max: number): 
   return value;
 }
 
+/** Pace every HTTP attempt, including transport retries, without overlapping fetches. */
+export function createIndexerRpcFetch(maxRps: number, fetcher: typeof fetch = globalThis.fetch, lifetime?: AbortSignal): typeof fetch {
+  const spacingMs = Math.ceil(1000 / positiveOption("rpcMaxRps", maxRps, 1, 20));
+  let nextRequestAt = 0;
+  let tail = Promise.resolve();
+  return (input, init) => {
+    const requestSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    const signals = [requestSignal, lifetime].filter((signal): signal is AbortSignal => signal !== undefined && signal !== null);
+    const signal = signals.length ? AbortSignal.any(signals) : undefined;
+    const operation = tail.then(async () => {
+      signal?.throwIfAborted();
+      const waitMs = nextRequestAt - Date.now();
+      if (waitMs > 0) await new Promise<void>((resolve, reject) => {
+        const aborted = () => { clearTimeout(timer); reject(signal!.reason); };
+        const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, waitMs);
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) aborted();
+      });
+      signal?.throwIfAborted();
+      nextRequestAt = Date.now() + spacingMs;
+      return fetcher(input, { ...init, ...(signal ? { signal } : {}) });
+    });
+    tail = operation.then(() => undefined, () => undefined);
+    // Reject a cancelled queued request promptly; its queue slot also skips the fetch.
+    if (!signal) return operation;
+    return new Promise<Response>((resolve, reject) => {
+      const aborted = () => reject(signal.reason);
+      signal.addEventListener("abort", aborted, { once: true });
+      if (signal.aborted) aborted();
+      void operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+    });
+  };
+}
+
+// A polling instance retains one budget across ticks, but never retains chain headers.
+const rpcFetches = new WeakMap<IndexerOpts, typeof fetch>();
+const rpcBudget = (opts: IndexerOpts) => positiveOption("rpcMaxRps", opts.rpcMaxRps ?? ([31337, 1337].includes(opts.chainId ?? 31337) ? 20 : 5), 1, 20);
+
 async function context(opts: IndexerOpts) {
-  const client = createPublicClient({ chain: { ...foundry, id: opts.chainId ?? foundry.id }, transport: http(opts.rpcUrl), cacheTime: 0 });
+  let fetchFn = rpcFetches.get(opts);
+  if (!fetchFn) { fetchFn = createIndexerRpcFetch(rpcBudget(opts)); rpcFetches.set(opts, fetchFn); }
+  const client = createPublicClient({ chain: { ...foundry, id: opts.chainId ?? foundry.id },
+    transport: http(opts.rpcUrl, { fetchFn, batch: false, timeout: 15_000, retryCount: 0 }), cacheTime: 0 });
   const chainId = await client.getChainId();
   if (opts.chainId !== undefined && opts.chainId !== chainId) throw new Error(`RPC chain ${chainId} does not match configured chain ${opts.chainId}`);
   const confirmations = positiveOption("confirmations", opts.confirmations ?? ([31337, 1337].includes(chainId) ? 0 : 12), 0, 100_000);
@@ -102,12 +144,12 @@ async function readBatch(opts: IndexerOpts, ctx: Awaited<ReturnType<typeof conte
     batches.push({ source: "ModelRegistry.Approved", entries: approved.filter(isMined).map((log) => ({ log, registryEvent: { type: "Approved", listingId: listingId(log.args.id) } })) });
     batches.push({ source: "ModelRegistry.Revoked", entries: revoked.filter(isMined).map((log) => ({ log, registryEvent: { type: "Revoked", listingId: listingId(log.args.id) } })) });
   }
-  const headerCache = new Map<bigint, ChainHeader>();
+  const headerCache = new Map<bigint, ChainHeader>([[toBlock, before]]);
   const tailStart = toBlock - BigInt(ctx.window) + 1n;
   const firstHeader = tailStart > fromBlock ? tailStart : fromBlock;
   const headers: ChainHeader[] = [];
   for (let number = firstHeader; number <= toBlock; number++) {
-    const header = await readHeader(number);
+    const header = headerCache.get(number) ?? await readHeader(number);
     headerCache.set(number, header);
     headers.push(header);
   }
@@ -244,8 +286,13 @@ export async function resetChainIndexer(opts: IndexerOpts): Promise<{ scope: str
 }
 
 export function startChainIndexer(opts: IndexerOpts & { pollMs?: number }): PollingTask {
-  return startPolling(async () => {
-    try { await indexChainOnce(opts); }
-    catch (err) { opts.log.warn({ err }, "indexer_tick_failed"); }
-  }, opts.pollMs ?? 2000);
+  const pollMs = positiveOption("pollMs", opts.pollMs ?? ([31337, 1337].includes(opts.chainId ?? 31337) ? 2000 : 30_000), 1000, 300_000);
+  const lifetime = new AbortController();
+  const runtime = { ...opts };
+  rpcFetches.set(runtime, createIndexerRpcFetch(rpcBudget(opts), globalThis.fetch, lifetime.signal));
+  const task = startPolling(async () => {
+    try { await indexChainOnce(runtime); }
+    catch (err) { if (!lifetime.signal.aborted) opts.log.warn({ err }, "indexer_tick_failed"); }
+  }, pollMs);
+  return { stop: async () => { lifetime.abort(new DOMException("Indexer stopped", "AbortError")); await task.stop(); } };
 }

@@ -26,8 +26,9 @@ and provider verification are separate checks.
 
 ### Release status
 
-Arc contracts are deployed and the API supports authorized settlement. Public browser
-checkout remains disabled pending an accepted hosted inference and payment journey.
+The hosted NEAR + Arc production deployment accepts **0.10 USDC per request**.
+Real GPU inference, signed receipts and Arc settlement/anchoring passed acceptance.
+Manual wallet acceptance was confirmed by the project owner on 3 October 2026.
 
 What is live and what is still open is published in the
 [roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).
@@ -48,4 +49,4 @@ mode, model and completed evidence.
 **[enclave-developer](https://github.com/nerdenpad/enclave-developer)** — the frontend,
 the backend and the contracts, together on `main`.
 
-<sub>Arc settlement is configured. Public checkout remains gated by end-to-end acceptance.</sub>
+<sub>NEAR GPU inference · Arc Mainnet USDC · Signed receipts · Public verification</sub>

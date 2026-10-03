@@ -1,10 +1,10 @@
-# Payment launch preparation
+# Payment operations
 
-Reviewed on 26 September 2026. WalletConnect is already configured under the supplied project. Arc contracts are deployed; the hosted API uses authorized Arc settlement with the dedicated relay. Pricing approval is deferred; public browser checkout stays disabled until hosted inference is unblocked.
+Reviewed on 3 October 2026. WalletConnect is configured under the supplied project. Arc contracts are deployed; the accepted hosted production profile uses authorized settlement with a dedicated relay. Public browser checkout is enabled at the approved **0.10 USDC per request**. Three real paid requests passed settlement and receipt verification; manual wallet acceptance was confirmed by the project owner on 3 October 2026. See [release progress](release-progress.md) for transaction links and [E1 acceptance](e1-release.md) for the remaining live failure scenarios.
 
 ## Operator inputs
 
-Provide public addresses for four distinct Arc Mainnet wallets:
+For a new deployment, provide public addresses for four distinct Arc Mainnet wallets. The initial planning reserves below are retained from 26 September; they are not a request to fund the existing deployment again:
 
 | Role | Suggested initial USDC | Purpose and access |
 | --- | ---: | --- |
@@ -39,13 +39,13 @@ For operating planning, 750,000 gas per complete paid request at five times the 
 - Browser checkout creates an expiring EIP-3009 receive authorization for an exact payer, recipient, amount and nonce. It checks the signature, selected account/network and reviewed deployment pins. Retries in the same open workspace reuse the authorization and original request. A page reload does not restore this browser state; reconcile server payment history before preparing another payment.
 - The relay has a dedicated signing identity; customer administrator, payer and treasury keys remain with the customer.
 
-## Remaining implementation and acceptance
+## Operating responsibilities and remaining acceptance
 
 - Arc Mainnet contracts are deployed. Record: ignored `.local/arc-deployment.json` locally and `/opt/enclave/_backend/data/arc-deployment.json` on the host. Local `contracts:deploy` remains Anvil-only; Arc uses `contracts:deploy-arc`.
 - Confirm revenue allocation. FeeVault currently splits funds 80/10/5/5, and model listings can take an additional provider share first. Do not treat all client payments as treasury revenue, secretly route allocation addresses to one wallet, or infer a new token supply from budget examples.
-- Approve a price after measuring model costs, network fees, failed-request costs and the treasury share. The 0.10 USDC development price is not a commercial tariff. No price or fee allocation was changed.
-- Complete real-token settlement/recovery acceptance. Browser payment signing is implemented behind a disabled release flag. Public EOA login now uses a separate SIWE signature and expiring session; connecting alone does not authenticate a user. Public logins cannot spend pilot resources. Verify receipt signing and ownership on the deployed path before enabling public checkout.
-- Verify hosted inference before accepting customer payments. Require one fresh, successful inference with strict evidence checks. WalletConnect readiness does not substitute for that result.
+- The commercial price is approved at 0.10 USDC per request. Monitor model costs, network fees, failed-request costs and the treasury share when reviewing margins; no revenue allocation was changed by this tariff approval.
+- Real-token settlement, receipt ownership and the WalletConnect browser journey passed acceptance. Public EOA login uses a separate SIWE signature and expiring session; connecting alone does not authenticate a user. Complete interruption during live settlement and recovery from that interruption; retain the original payment and execution journals.
+- Hosted inference passed strict evidence and signed final-response checks. Every new request still requires fresh verification. Renew the reviewed provider policy and accepted release before their expiry on 8 October 2026 at 14:29:11 UTC.
 - Keep treasury-to-relay replenishment manual initially. Automatic replenishment, balance alerts and cumulative daily spending caps are not configured. They require explicit limits and an agreed funding mechanism; never give the service wallet unrestricted treasury access.
 
-The four customer addresses and their initial balances have been checked read-only. Deployment and paid tests still require customer signing, funding of the dedicated relay, approved parameters and a working inference path. The operator need not configure WalletConnect again.
+The four customer addresses and their initial balances were checked during preparation. The existing deployment and accepted paid tests are recorded in release progress. Replacement deployments, ownership changes and new paid acceptance runs require their own reviewed parameters and authorized signing. The operator need not configure WalletConnect again.

@@ -3,7 +3,7 @@ import { config as dotenv } from "dotenv";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createNearInference, createVendorRoots, DevCvm, encryptAesGcm, decryptAesGcm, sha256Hex, verifyProviderProof, verifyNearTranscript } from "@enclave/core";
-import { createNearAttestationVerifier } from "../apps/api/src/near-provider.js";
+import { createNearAttestationVerifier, nvidiaVerifierOptions } from "../apps/api/src/near-provider.js";
 import { loadConfig } from "../apps/api/src/config.js";
 
 dotenv({ path: [".env.near", ".env"], quiet: true });
@@ -14,7 +14,9 @@ try {
   await mkdir("work", { recursive: true });
   const inference = createNearInference({ baseUrl: config.INFERENCE_BASE_URL, model: config.INFERENCE_MODEL,
     apiKey: config.INFERENCE_API_KEY!, timeoutMs: config.INFERENCE_TIMEOUT_MS, maxTokens: 32,
-    verifyAttestation: createNearAttestationVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY! }),
+    verifyAttestation: createNearAttestationVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY!,
+      apiKey: config.INFERENCE_API_KEY!, ...nvidiaVerifierOptions(config),
+      ...(config.NEAR_ATTESTATION_POLICY_SHA256 ? { policySha256: config.NEAR_ATTESTATION_POLICY_SHA256 } : {}) }),
   });
   const vendor = await createVendorRoots();
   const policy = { version: config.TCB_POLICY_VERSION, servingImageId: config.SERVING_IMAGE_ID, requireCpuTee: true as const, requireGpuCc: true as const };

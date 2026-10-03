@@ -18,10 +18,12 @@ const receiptTypes = { InferenceReceipt: [
 ] } as const;
 
 async function fixture(page: Page, options: { rejected?: boolean; maliciousName?: string; authorized?: boolean; paidFailureOnce?: boolean;
-  paginated?: boolean; secondReceipt?: boolean; backend?: "near-verified" | "openai-compatible" } = {}) {
-  const health = { ok: true, service: "enclave-gateway", teeMode: "dev", inferenceBackend: options.backend ?? "near-verified", chainId: options.authorized ? 8453 : 31337,
-    paymentMode: options.authorized ? "authorized" : "mock", servingModel: { id: "zai-org/GLM-5.3-Flash", name: "GLM-5.3-Flash", modelHash, codeHash },
-    receiptSigner: signer.address, verifierAddress: verifier, agentRuntimeEnabled: false, inferencePriceUsdc: 0.1 };
+  paginated?: boolean; secondReceipt?: boolean; backend?: "near-verified" | "openai-compatible"; arcStage?: "pilot" | "production" } = {}) {
+  const health = { ok: true, service: "enclave-gateway", teeMode: options.arcStage ? "managed-near" : "dev", inferenceBackend: options.backend ?? "near-verified", chainId: options.arcStage ? 5042 : options.authorized ? 8453 : 31337,
+    paymentMode: options.arcStage || options.authorized ? "authorized" : "mock", servingModel: { id: "zai-org/GLM-5.3-Flash", name: "GLM-5.3-Flash", modelHash, codeHash },
+    receiptSigner: signer.address, verifierAddress: verifier, agentRuntimeEnabled: false, inferencePriceUsdc: 0.1,
+    ...(options.arcStage ? { inferenceRoute: "near-direct-experimental", deployment: { stage: options.arcStage, productionReady: options.arcStage === "production",
+      gatewayKeyCustody: "software", inferenceTrust: "near-cpu-gpu", releaseProfile: "near-arc" }, providerPolicy: { sha256: hash("provider-policy"), expiresAt: "2026-10-10T00:00:00Z" } } : {}) };
   const quote = { cpuQuote: "development-software", gpuQuote: "development-software", measurement: codeHash, tcbVersion: 1, timestamp: Date.now(), signature };
   const stored = { id: ids.receipt, receiptVersion: 2, nonce: hash("stored-nonce"), chainId: health.chainId, verifierAddress: verifier, modelHash, codeHash,
     inHash: hash("old-input"), outHash: hash("old-output"), attRef: hash(signature), ts: "1800489600", sig: signature, typedHash: hash("stored-receipt"),
@@ -118,7 +120,7 @@ test("unauthorized connection shows a real error and never falls back to populat
 
 test("connection distinguishes NEAR GPU and local test chain with owner history", async ({ page }) => {
   const f = await fixture(page); await connect(page);
-  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · DEVELOPMENT GATEWAY");
+  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · RELEASE NOT REPORTED");
   await expect(page.locator("#environment-description")).toContainText(/remote hardware verification/i);
   await expect(page.locator("#topology-chain")).toHaveText("CHAIN 31337 · TEST USDC · x402");
   await expect(page.locator("#metric-calls")).toHaveText("7");
@@ -134,6 +136,18 @@ test("connection distinguishes NEAR GPU and local test chain with owner history"
   await expect(page.locator("#agent-cards")).toContainText("0.300000 USDC");
   expect(f.requests.find((r) => r.path === "/v1/workspace")?.headers["x-api-key"]).toBe(key);
   await expect(page.locator("#api-key")).toHaveValue("");
+});
+
+for (const arcStage of ["pilot", "production"] as const) test(`dashboard shows reported Arc ${arcStage} with public checkout blocked`, async ({ page }) => {
+  const f = await fixture(page, { arcStage }); await connect(page);
+  await expect(page.locator("#environment-badge")).toHaveText(arcStage === "pilot" ? "NEAR GPU · PILOT" : "NEAR GPU · PRODUCTION (REPORTED)");
+  await expect(page.locator("#environment-description")).toContainText(arcStage === "pilot" ? "production not ready" : "reported ready");
+  await expect(page.locator("#request-note")).toContainText("Configured price: 0.100000 USDC");
+  await expect(page.locator("#request-note")).toContainText("Public checkout blocked");
+  await expect(page.locator("#payment-network")).toHaveText("Arc (chain 5042)");
+  await expect(page.locator("#payment-description")).toContainText("Authorized settlement is configured");
+  await expect(page.locator("#payment-description")).not.toContainText("test USDC");
+  expect(f.counts()).toEqual({ settlements: 0, inferences: 0 });
 });
 
 test("stored hostile agent names are text, never executable HTML", async ({ page }) => {
@@ -291,7 +305,7 @@ test("expanded receipt history survives automatic polling and resets only on exp
 
 test("OpenAI-compatible provider is labelled as a model endpoint without echo or hardware claims", async ({ page }) => {
   await fixture(page, { backend: "openai-compatible" }); await connect(page);
-  await expect(page.locator("#environment-badge")).toHaveText("MODEL ENDPOINT · DEVELOPMENT GATEWAY");
+  await expect(page.locator("#environment-badge")).toHaveText("MODEL ENDPOINT · RELEASE NOT REPORTED");
   await expect(page.locator("#environment-description")).toContainText("does not verify provider hardware");
   await expect(page.locator("#topology-provider")).toHaveText("OpenAI-compatible model provider");
   await expect(page.locator("#request-note")).not.toContainText("Echo");

@@ -3,7 +3,7 @@ import pino from "pino";
 import { chainEvents, indexCursors, models } from "@enclave/db";
 import { createPublicClient } from "viem";
 import { APPROVED, LISTED, REVOKED, SETTLED, VERIFIED, addressReady, getIndexerScope, indexChainOnce, resetChainIndexer, startChainIndexer, type IndexerOpts } from "./indexer.js";
-import { indexerScope, serializeCheckpoints } from "./reorg.js";
+import { indexerScope, parseCheckpoints, serializeCheckpoints } from "./reorg.js";
 import { sqlQuery, testDb } from "./test-db.js";
 
 const rpc = vi.hoisted(() => ({ getChainId: vi.fn(), getBlockNumber: vi.fn(), getBlock: vi.fn(), getLogs: vi.fn() }));
@@ -84,6 +84,17 @@ describe("confirmed chain indexing", () => {
     expect(await indexChainOnce(opts)).toEqual({ fromBlock: 11n, toBlock: 10n });
     expect(rpc.getLogs).not.toHaveBeenCalled();
   });
+  it("retains the complete checkpoint window while fetching only new headers and a fresh end recheck", async () => {
+    const { mock, opts } = setup();
+    mock.rows.mockResolvedValueOnce([saved(1000n, 873n)]);
+    rpc.getBlockNumber.mockResolvedValue(1002n);
+    await indexChainOnce(opts);
+    expect(rpc.getBlock.mock.calls.map(([input]) => input.blockNumber)).toEqual([0n, 1000n, 1002n, 1001n, 1002n]);
+    const checkpoints = parseCheckpoints(mock.values.mock.calls.at(-1)![0].checkpoints);
+    expect(checkpoints).toHaveLength(128);
+    expect(checkpoints[0]).toEqual({ number: 875n, hash: blockHash(875n) });
+    expect(checkpoints.at(-1)).toEqual({ number: 1002n, hash: blockHash(1002n) });
+  });
   it("stores canonical mined logs idempotently with scope and block hashes", async () => {
     const { mock, opts, scope } = setup({ meter: address, feeVault: address });
     rpc.getLogs.mockResolvedValueOnce([log(), { ...log(), blockNumber: null }, { ...log(), transactionHash: null }, { ...log(), logIndex: null }, { ...log(), removed: true }])
@@ -122,7 +133,7 @@ describe("confirmed chain indexing", () => {
     if (failure === "oversized-id") rpc.getLogs.mockResolvedValueOnce([]).mockResolvedValueOnce([log(10n, 0, { id: 2n ** 60n })]).mockResolvedValueOnce([]);
     if (failure === "changing-head") {
       let headReads = 0;
-      rpc.getBlock.mockImplementation(async ({ blockNumber }: { blockNumber: bigint }) => ({ ...header(blockNumber), hash: blockNumber === 10n && ++headReads >= 3 ? blockHash(10n, 1) : blockHash(blockNumber) }));
+      rpc.getBlock.mockImplementation(async ({ blockNumber }: { blockNumber: bigint }) => ({ ...header(blockNumber), hash: blockNumber === 10n && ++headReads >= 2 ? blockHash(10n, 1) : blockHash(blockNumber) }));
     }
     await expect(indexChainOnce(opts)).rejects.toThrow();
     expect(mock.insert).not.toHaveBeenCalledWith(indexCursors);
@@ -139,11 +150,29 @@ describe("confirmed chain indexing", () => {
     const { opts } = setup();
     const warn = vi.spyOn(opts.log, "warn");
     rpc.getChainId.mockRejectedValueOnce(new Error("network"));
-    const task = startChainIndexer({ ...opts, pollMs: 10 });
-    await vi.advanceTimersByTimeAsync(10);
+    const task = startChainIndexer({ ...opts, pollMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1000);
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), "indexer_tick_failed");
     expect(rpc.getChainId).toHaveBeenCalledTimes(2);
     await task.stop();
+  });
+  it("uses a slower nonlocal polling default and stops subsequent ticks", async () => {
+    vi.useFakeTimers();
+    const { opts } = setup({ chainId: 5042 });
+    rpc.getChainId.mockResolvedValue(5042);
+    const task = startChainIndexer(opts);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(rpc.getChainId).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(rpc.getChainId).toHaveBeenCalledTimes(2);
+    await task.stop();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(rpc.getChainId).toHaveBeenCalledTimes(2);
+  });
+  it.each([0, 999, 300_001, 1000.5, NaN])("rejects unbounded poll intervals before RPC work: %s", pollMs => {
+    const { opts } = setup();
+    expect(() => startChainIndexer({ ...opts, pollMs })).toThrow("pollMs");
+    expect(rpc.getChainId).not.toHaveBeenCalled();
   });
 });
 

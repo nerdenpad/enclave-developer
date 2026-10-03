@@ -1,22 +1,22 @@
 # Roadmap
 
-Status reviewed on 28 September 2026. Milestones describe delivery and acceptance evidence, not estimated launch dates.
+Status reviewed on 3 October 2026. The hosted deployment runs the accepted NEAR + Arc production profile. Milestones describe delivery and acceptance evidence, not estimated launch dates.
 
 | Milestone | Status | Completion evidence |
 | --- | --- | --- |
-| Connected frontend and backend | Implemented | Local integration evidence for a model response, signed receipt, local-chain anchoring and persistent history |
-| Public pilot | Available with limits | Website, API and HTTPS; hosted inference still requires a fresh accepted request |
+| Connected frontend and backend | Implemented | Real hosted inference, signed receipts, Arc anchoring and persistent owner history |
+| Hosted production deployment | Available | HTTPS website/API, accepted release manifest, strict startup checks and public checkout at 0.10 USDC per request |
 | Receipt verification | Implemented | Public `/verify` page, local signature checks and optional contract/policy/anchor checks |
 | Deployment transparency | Implemented | Public `/status` page with configured network, model, policy and limits |
-| Hosted inference acceptance | Pending | Successful strict CPU/GPU verification, model response and independently checked receipt on the hosted path |
-| Public-chain settlement | Configured; public checkout disabled | Arc `5042` contracts and authorized API settlement; one small real-USDC browser payment and recovery check remain |
-| Wallet connections | Configured | Browser wallets, Arc switching and WalletConnect; real-wallet approval and payment compatibility still need acceptance |
-| Production user access | Pending | Deployed user authentication and receipt ownership checks |
-| E1 release | Open | Complete the hosted inference and Arc USDC acceptance journey; see [E1 acceptance](e1-release.md) |
+| Hosted inference acceptance | Passed | Strict CPU/GPU, reviewed workload, TLS and provider signature checks; third paid request returned complete final content |
+| Public-chain settlement | Enabled | Arc `5042`, real USDC, three accepted calls totalling 0.30 USDC; confirmed settlements and receipt anchors |
+| Wallet connections | Accepted | WalletConnect protocol/browser journey passed; manual wallet acceptance confirmed by the project owner on 3 October 2026 |
+| Production user access | Implemented | Wallet sign-in, scoped sessions, owner history and authenticated receipt export |
+| E1 operational acceptance | Open | Live settlement interruption/recovery, signer rotation and model revocation; see [E1 acceptance](e1-release.md) |
 
-## Next product features
+## Released product features
 
-The following six features can be built from existing receipt, payment, model and status data. Public wording must follow the actual network and deployment evidence.
+The following six features use existing receipt, payment, model and status data. Public counts and links are scoped to the configured Arc deployment.
 
 | Feature | Scope | Acceptance condition |
 | --- | --- | --- |

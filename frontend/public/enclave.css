@@ -52,3 +52,10 @@ body:has(.dashboard-main){background:#f5f8ff}.dashboard-main{padding:116px 0 35p
 .boundary-icon{mask-image:none!important;-webkit-mask-image:none!important;clip-path:none!important;line-height:24px!important}
 
 .node-glyph{display:flex;align-items:center;justify-content:center;line-height:0;padding:0}.node-glyph svg{display:block;width:18px;height:18px;flex:none;margin:0}
+
+/* Social links keep their button geometry within the footer link layout. */
+.en-footer .footer-navigation .social-row{display:flex;align-items:center;gap:10px}
+.en-footer .footer-navigation a.social-button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 46px;width:46px;height:46px;margin:0;padding:0;border:1px solid #c6d3ef;border-radius:8px;background:#f5f8ffcc;color:#536ca6;line-height:1;text-decoration:none;transition:background-color 160ms ease,color 160ms ease,border-color 160ms ease}
+.en-footer .footer-navigation .social-button svg{display:block;width:22px;height:22px;flex:none;fill:currentColor}
+.en-footer .footer-navigation a.social-button:focus-visible{outline:2px solid #718bd1;outline-offset:4px}
+@media(hover:hover) and (pointer:fine){.en-footer .footer-navigation a.social-button:hover{background:#e3eafa;border-color:#9aafd9;color:#394b7a}}

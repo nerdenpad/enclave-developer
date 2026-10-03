@@ -25,6 +25,7 @@
     "test:backend": "npm --prefix _backend test",
     "test:frontend": "npm --prefix frontend test",
     "test:browser": "npm --prefix frontend run test:e2e",
+    "test:motion": "npm --prefix frontend run test:motion",
     "test:launch": "node tests/local-launch.mjs",
     "test:receipt-chain": "npm --prefix _backend run contracts:compile && node --import ./_backend/node_modules/tsx/dist/loader.mjs frontend/scripts/check-receipt-chain.ts",
     "test:integration": "npm --prefix _backend run test:integration",

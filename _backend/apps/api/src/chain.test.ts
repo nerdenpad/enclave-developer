@@ -92,7 +92,7 @@ describe("chain configuration", () => {
       account: expect.objectContaining({ address: privateKeyToAccount(settings.DEPLOYER_PRIVATE_KEY).address }),
       chain: expect.objectContaining({ id: settings.ARC_CHAIN_ID }),
     }));
-    expect(http).toHaveBeenCalledWith(settings.ARC_RPC_URL);
+    expect(http).toHaveBeenCalledWith(settings.ARC_RPC_URL, expect.objectContaining({ batch: false, fetchFn: expect.any(Function) }));
     for (const [options] of vi.mocked(createPublicClient).mock.calls) {
       expect(options).toEqual(expect.objectContaining({ chain: expect.objectContaining({ id: settings.ARC_CHAIN_ID }) }));
     }

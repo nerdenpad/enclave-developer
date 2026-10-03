@@ -3,12 +3,29 @@ import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import https from "node:https";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { isAbsolute } from "node:path";
 import { checkServerIdentity, type PeerCertificate, type TLSSocket } from "node:tls";
 import { z } from "zod";
 import { AppError, sha256Hex } from "@enclave/core";
 import type { NearAttestationVerifier, NearVerifiedFetch } from "@enclave/core";
 
-export type NearProviderOptions = { pythonPath: string; policyPath: string; policySha256?: string; verifierPath?: string; apiKey?: string };
+export type NvidiaLocalRuntime = { binaryPath: string; libraryPath: string };
+export type NearProviderOptions = { pythonPath: string; policyPath: string; policySha256?: string; verifierPath?: string; apiKey?: string; nvidiaLocal?: NvidiaLocalRuntime };
+/** Explicit trusted operator configuration; never inherit ambient vendor settings. */
+export function nvidiaVerifierOptions(env: { NVIDIA_VERIFIER_MODE?: string | undefined; NVIDIA_NVAT_BINARY?: string | undefined; NVIDIA_NVAT_LIBRARY?: string | undefined }): Pick<NearProviderOptions, "nvidiaLocal"> {
+  const mode = env.NVIDIA_VERIFIER_MODE ?? "nras";
+  if (mode === "nras") {
+    if (env.NVIDIA_NVAT_BINARY || env.NVIDIA_NVAT_LIBRARY) throw new Error("Local NVIDIA artifacts require explicit local verification mode");
+    return {};
+  }
+  const binaryPath = env.NVIDIA_NVAT_BINARY, libraryPath = env.NVIDIA_NVAT_LIBRARY;
+  if (mode !== "local" || !binaryPath || !libraryPath || binaryPath === libraryPath
+    || [binaryPath, libraryPath].some(path => !isAbsolute(path) || /[\0\r\n]/.test(path))
+    || /[:$]/.test(libraryPath)) {
+    throw new Error("Local NVIDIA verification requires absolute binary and library paths");
+  }
+  return { nvidiaLocal: { binaryPath, libraryPath } };
+}
 const defaultVerifierPath = fileURLToPath(new URL("../../../infra/near/verify.py", import.meta.url));
 const hex32 = z.string().regex(/^(?:0x)?[0-9a-f]{64}$/i);
 const signerAddress = z.string().regex(/^0x[0-9a-f]{40}$/i).refine(value => !/^0x0{40}$/i.test(value));
@@ -19,7 +36,49 @@ const verdictSchema = z.object({
   archivedHardwareVerified: z.boolean().optional(),
 }).passthrough();
 const normalizeHex = (value: string) => value.replace(/^0x/, "").toLowerCase();
-const unavailable = () => new AppError("INFERENCE_ATTESTATION_FAILED", "NEAR hardware attestation or transport verification failed", 503);
+const verifierErrorCodes = [
+  "ARCHIVE_INVALID", "ARCHIVE_TIME_INVALID", "ARCHIVE_VERDICT_MISMATCH", "INPUT_INVALID", "POLICY_CHANGED", "POLICY_INVALID", "POLICY_EXPIRED",
+  "CPU_BINDING_MISMATCH", "CPU_DEBUG_REJECTED", "CPU_INVALID", "CPU_TCB_REJECTED", "CPU_TYPE_REJECTED", "CPU_VERIFICATION_FAILED",
+  "GATEWAY_COMPOSE_MISMATCH", "GATEWAY_EVENT_LOG_INVALID", "GATEWAY_EVENT_LOG_MISMATCH", "GATEWAY_EVIDENCE_MISSING", "GATEWAY_POLICY_MISMATCH", "GATEWAY_SIGNER_INVALID",
+  "MODEL_EVENT_LOG_MISMATCH", "MODEL_EVIDENCE_DUPLICATE", "MODEL_EVIDENCE_INVALID", "MODEL_EVIDENCE_MISSING", "MODEL_INVALID", "NONCE_MISMATCH",
+  "NVIDIA_GPU_BINDING_INVALID", "NVIDIA_GPU_REJECTED", "NVIDIA_GPU_SET_INVALID", "NVIDIA_IMPLEMENTATION_CHANGED", "NVIDIA_INVALID",
+  "NVIDIA_LOCAL_CONFIG_INVALID", "NVIDIA_LOCAL_OUTPUT_INVALID", "NVIDIA_LOCAL_TIMEOUT", "NVIDIA_LOCAL_UNAVAILABLE", "NVIDIA_NONCE_INVALID",
+  "NVIDIA_RESULT_REJECTED", "NVIDIA_SIGNATURE_INVALID", "NVIDIA_TIME_INVALID", "NVIDIA_UNAVAILABLE", "NVIDIA_VERIFIER_MISMATCH",
+  "SIGNING_ALGORITHM_REJECTED", "TLS_BINDING_MISMATCH", "VERIFICATION_ABORTED", "VERIFICATION_EXPIRED", "VERIFICATION_FAILED", "VERIFICATION_TIMEOUT",
+  "WORKLOAD_ACTIONS_INVALID", "WORKLOAD_BINDING_MISMATCH", "WORKLOAD_COMPOSE_MISMATCH", "WORKLOAD_EVIDENCE_MISSING", "WORKLOAD_MANAGER_UNKNOWN",
+  "WORKLOAD_NONCE_MISMATCH", "WORKLOAD_NOT_APPROVED", "WORKLOAD_VM_MISMATCH",
+] as const;
+export type NearAttestationFailure =
+  | { stage: "verifier"; reason: "aborted" | "output-limit" | "process-failed" | "stdin-failed" | "invalid-output" | "archive-unverified" | "invalid-input" }
+  | { stage: "verifier"; reason: "rejected"; verifierError: typeof verifierErrorCodes[number] }
+  | { stage: "transport"; reason: "aborted" | "tls" | "request" | "response" | "body-limit" | "encoding" | "body-type" }
+  | { stage: "report"; reason: "http-status" | "json" | "shape" | "nonce-binding" | "tls-binding" | "model-binding" }
+  | { stage: "policy"; reason: "unreadable" | "size" | "changed" | "json" }
+  | { stage: "session"; reason: "tls-binding" | "signer" | "signer-set" | "time" | "origin" | "expired" }
+  | { stage: "configuration"; reason: "credentials" };
+// Only this private class carries trusted diagnostics through outer catches.
+// Arbitrary errors, caller details, stderr and provider fields are never copied.
+class NearAttestationError extends AppError {
+  constructor(diagnostic: NearAttestationFailure) {
+    super("INFERENCE_ATTESTATION_FAILED", "NEAR hardware attestation or transport verification failed", 503, { attestationFailure: diagnostic });
+  }
+}
+const unavailable = (diagnostic: NearAttestationFailure = { stage: "transport", reason: "request" }) => new NearAttestationError(diagnostic);
+const tlsErrorCodes = new Set(["ERR_TLS_CERT_ALTNAME_INVALID", "CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "CERT_REVOKED", "ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED"]);
+function transportFailure(error: unknown, signal: RequestInit["signal"]): NearAttestationError {
+  if (signal?.aborted) return unavailable({ stage: "transport", reason: "aborted" });
+  if (error instanceof NearAttestationError) return error;
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  return unavailable({ stage: "transport", reason: typeof code === "string" && tlsErrorCodes.has(code) ? "tls" : "request" });
+}
+function fixedVerifierError(output: Buffer): typeof verifierErrorCodes[number] | undefined {
+  try {
+    const value: unknown = JSON.parse(output.toString("utf8"));
+    if (!value || typeof value !== "object" || !("ok" in value) || value.ok !== false || !("error" in value)) return undefined;
+    return verifierErrorCodes.find(code => value.error === code);
+  } catch { return undefined; }
+}
 
 export function nearBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -30,7 +89,7 @@ export function nearBaseUrl(value: string): URL {
 }
 
 export function peerSpkiSha256(cert: Pick<PeerCertificate, "raw">): string {
-  if (!cert.raw?.length) throw unavailable();
+  if (!cert.raw?.length) throw unavailable({ stage: "transport", reason: "tls" });
   const spki = new X509Certificate(cert.raw).publicKey.export({ format: "der", type: "spki" });
   return createHash("sha256").update(spki).digest("hex");
 }
@@ -39,38 +98,40 @@ export function peerSpkiSha256(cert: Pick<PeerCertificate, "raw">): string {
 export function checkNearCertificate(hostname: string, cert: PeerCertificate, expectedSpki: string): Error | undefined {
   const identityError = checkServerIdentity(hostname, cert);
   if (identityError) return identityError;
-  try { if (peerSpkiSha256(cert) !== normalizeHex(expectedSpki)) return unavailable(); }
-  catch { return unavailable(); }
+  try { if (peerSpkiSha256(cert) !== normalizeHex(expectedSpki)) return unavailable({ stage: "transport", reason: "tls" }); }
+  catch { return unavailable({ stage: "transport", reason: "tls" }); }
   return undefined;
 }
 
 type WireResponse = { response: Response; peerSpki: string };
 async function requestBytes(url: URL, init: RequestInit, agent: https.Agent, maximum = 8_388_608): Promise<WireResponse> {
-  if (init.body != null && typeof init.body !== "string") throw unavailable();
+  if (init.body != null && typeof init.body !== "string") throw unavailable({ stage: "transport", reason: "body-type" });
   const requestBody = init.body as string | undefined;
   const headers = Object.fromEntries(new Headers(init.headers).entries());
   if (requestBody !== undefined) headers["content-length"] = String(Buffer.byteLength(requestBody));
-  return new Promise((resolve, reject) => {
+  return new Promise<WireResponse>((resolve, reject) => {
     const req = https.request(url, { method: init.method ?? "GET", headers, agent,
       ...(init.signal ? { signal: init.signal } : {}),
     }, (res) => {
       let peerSpki: string;
       try { peerSpki = peerSpkiSha256((res.socket as TLSSocket).getPeerCertificate()); }
-      catch { res.destroy(); reject(unavailable()); return; }
+      catch { res.destroy(); reject(unavailable({ stage: "transport", reason: "tls" })); return; }
       const declared = Number(res.headers["content-length"] ?? 0);
-      if (!Number.isSafeInteger(declared) || declared < 0 || declared > maximum
-        || (res.headers["content-encoding"] && res.headers["content-encoding"] !== "identity")) {
-        res.destroy(); reject(unavailable()); return;
+      if (!Number.isSafeInteger(declared) || declared < 0 || declared > maximum) {
+        res.destroy(); reject(unavailable({ stage: "transport", reason: "body-limit" })); return;
+      }
+      if (res.headers["content-encoding"] && res.headers["content-encoding"] !== "identity") {
+        res.destroy(); reject(unavailable({ stage: "transport", reason: "encoding" })); return;
       }
       const chunks: Buffer[] = [];
       let size = 0;
       res.on("data", (chunk: Buffer) => {
         size += chunk.length;
-        if (size > maximum) { res.destroy(); reject(unavailable()); return; }
+        if (size > maximum) { res.destroy(); reject(unavailable({ stage: "transport", reason: "body-limit" })); return; }
         chunks.push(Buffer.from(chunk));
       });
-      res.on("error", () => reject(unavailable()));
-      res.on("aborted", () => reject(unavailable()));
+      res.on("error", () => reject(unavailable({ stage: "transport", reason: init.signal?.aborted ? "aborted" : "response" })));
+      res.on("aborted", () => reject(unavailable({ stage: "transport", reason: init.signal?.aborted ? "aborted" : "response" })));
       res.on("end", () => {
         try {
           const responseHeaders = new Headers();
@@ -80,51 +141,89 @@ async function requestBytes(url: URL, init: RequestInit, agent: https.Agent, max
           const status = res.statusCode ?? 502;
           // No redirects or decompression: the verifier hashes the original HTTP body bytes.
           resolve({ response: new Response([204, 205, 304].includes(status) ? null : Buffer.concat(chunks), { status, headers: responseHeaders }), peerSpki });
-        } catch { reject(unavailable()); }
+        } catch { reject(unavailable({ stage: "transport", reason: "response" })); }
       });
     });
-    req.on("error", () => reject(unavailable()));
+    req.on("error", error => reject(transportFailure(error, init.signal)));
     if (requestBody !== undefined) req.write(requestBody);
     req.end();
   });
 }
 
 export async function runNearVerifier(options: NearProviderOptions, input: unknown, signal: AbortSignal, cloud = false, archive = false): Promise<z.infer<typeof verdictSchema>> {
-  signal.throwIfAborted();
+  if (signal.aborted) throw unavailable({ stage: "verifier", reason: "aborted" });
+  let serializedInput: string;
+  try {
+    const encoded = JSON.stringify(input);
+    if (encoded === undefined) throw new Error();
+    serializedInput = encoded;
+  } catch { throw unavailable({ stage: "verifier", reason: "invalid-input" }); }
   const env: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
   // The verifier only receives public hardware evidence, never inference credentials.
-  for (const name of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE"] as const) {
+  for (const name of ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "ProgramData", "PROGRAMDATA", "TEMP", "TMP", "HOME", "USERPROFILE"] as const) {
     if (process.env[name]) env[name] = process.env[name];
   }
-  return new Promise((resolve, reject) => {
+  if (options.nvidiaLocal) {
+    const checked = nvidiaVerifierOptions({ NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: options.nvidiaLocal.binaryPath,
+      NVIDIA_NVAT_LIBRARY: options.nvidiaLocal.libraryPath });
+    env.NVIDIA_VERIFIER_MODE = "local";
+    env.NVIDIA_NVAT_BINARY = checked.nvidiaLocal!.binaryPath;
+    env.NVIDIA_NVAT_LIBRARY = checked.nvidiaLocal!.libraryPath;
+  }
+  return new Promise<z.infer<typeof verdictSchema>>((resolve, reject) => {
     const child = spawn(options.pythonPath, [options.verifierPath ?? defaultVerifierPath, "--policy", options.policyPath,
       ...(options.policySha256 === undefined ? [] : ["--policy-sha256", options.policySha256]),
       ...(archive ? [cloud ? "--cloud-archive" : "--direct-archive"] : cloud ? ["--cloud"] : [])], {
-      env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, signal,
+      env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, signal, detached: process.platform !== "win32",
     });
+    // An owned POSIX process group includes the native verifier. Abort must stop
+    // the whole group even if Python exits before cleaning up its child.
+    let terminationTimer: NodeJS.Timeout | undefined;
+    const terminateGroup = (kind: NodeJS.Signals) => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, kind);
+        else child.kill(kind);
+      } catch { /* Already exited; never forward process diagnostics. */ }
+    };
+    const terminate = () => {
+      terminateGroup("SIGTERM");
+      terminationTimer ??= setTimeout(() => terminateGroup("SIGKILL"), 3_000);
+      terminationTimer.unref();
+    };
+    signal.addEventListener("abort", terminate, { once: true });
+    if (signal.aborted) terminate();
     const chunks: Buffer[] = [];
     let size = 0;
     let settled = false;
-    const fail = () => { if (!settled) { settled = true; reject(unavailable()); } };
+    const fail = (diagnostic: NearAttestationFailure) => { if (!settled) { settled = true; reject(unavailable(diagnostic)); } };
     child.stdout.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 2_097_152) { child.kill(); fail(); return; }
+      if (size > 2_097_152) { terminate(); fail({ stage: "verifier", reason: "output-limit" }); return; }
       chunks.push(Buffer.from(chunk));
     });
     child.stderr.on("data", () => { /* Never forward arbitrary verifier diagnostics. */ });
-    child.stdin.on("error", fail);
-    child.on("error", fail);
+    child.stdin.on("error", () => fail({ stage: "verifier", reason: signal.aborted ? "aborted" : "stdin-failed" }));
+    child.on("error", () => fail({ stage: "verifier", reason: signal.aborted ? "aborted" : "process-failed" }));
     child.on("close", (code) => {
+      signal.removeEventListener("abort", terminate);
+      if (terminationTimer) clearTimeout(terminationTimer);
+      if (process.platform !== "win32") terminateGroup("SIGKILL");
       if (settled) return;
-      if (code !== 0 || signal.aborted) { fail(); return; }
+      if (signal.aborted) { fail({ stage: "verifier", reason: "aborted" }); return; }
+      const output = Buffer.concat(chunks), verifierError = fixedVerifierError(output);
+      if (verifierError) { fail({ stage: "verifier", reason: "rejected", verifierError }); return; }
+      if (code !== 0) { fail({ stage: "verifier", reason: "process-failed" }); return; }
       try {
-        const parsed = verdictSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        if (archive && parsed.archivedHardwareVerified !== true) { fail(); return; }
+        const parsed = verdictSchema.parse(JSON.parse(output.toString("utf8")));
+        if (archive && parsed.archivedHardwareVerified !== true) { fail({ stage: "verifier", reason: "archive-unverified" }); return; }
         settled = true;
         resolve(parsed);
-      } catch { fail(); }
+      } catch { fail({ stage: "verifier", reason: "invalid-output" }); }
     });
-    child.stdin.end(JSON.stringify(input));
+    child.stdin.end(serializedInput);
+  }).catch((error: unknown) => {
+    if (error instanceof NearAttestationError) throw error;
+    throw unavailable({ stage: "verifier", reason: signal.aborted ? "aborted" : "process-failed" });
   });
 }
 
@@ -143,7 +242,7 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
     if (cloud) {
       reportUrl.searchParams.set("model", model);
       reportUrl.searchParams.set("provider", "near");
-      if (!options.apiKey?.trim() || /[\r\n]/.test(options.apiKey)) throw unavailable();
+      if (!options.apiKey?.trim() || /[\r\n]/.test(options.apiKey)) throw unavailable({ stage: "configuration", reason: "credentials" });
     }
     let attestedSpki: string | undefined;
     let handedOff = false;
@@ -156,33 +255,48 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
     try {
       const { response, peerSpki } = await requestBytes(reportUrl, { signal, headers: { accept: "application/json", "accept-encoding": "identity",
         ...(cloud ? { authorization: `Bearer ${options.apiKey}`, "x-no-aliasing": "true" } : {}) } }, bootstrapAgent);
-      if (response.status !== 200) throw unavailable();
+      if (response.status !== 200) throw unavailable({ stage: "report", reason: "http-status" });
       const rawReport = await response.text();
-      const report = JSON.parse(rawReport) as Record<string, unknown>;
+      let report: Record<string, unknown>;
+      try {
+        const value: unknown = JSON.parse(rawReport);
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable({ stage: "report", reason: "shape" });
+        report = value as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof NearAttestationError) throw error;
+        throw unavailable({ stage: "report", reason: "json" });
+      }
       const gatewayReport = cloud ? report.gateway_attestation as Record<string, unknown> | undefined : report;
-      if (!gatewayReport || gatewayReport.request_nonce !== nonce
-        || typeof gatewayReport.tls_cert_fingerprint !== "string" || normalizeHex(gatewayReport.tls_cert_fingerprint) !== peerSpki
-        || (!cloud && report.model_name !== model)
-        || (cloud && (!Array.isArray(report.model_attestations) || report.model_attestations.length < 1))) throw unavailable();
-      const policyBefore = await readFile(options.policyPath);
-      if (policyBefore.length > 1_048_576) throw unavailable();
+      if (!gatewayReport || typeof gatewayReport !== "object" || Array.isArray(gatewayReport)
+        || typeof gatewayReport.request_nonce !== "string" || typeof gatewayReport.tls_cert_fingerprint !== "string"
+        || (cloud && (!Array.isArray(report.model_attestations) || report.model_attestations.length < 1))) throw unavailable({ stage: "report", reason: "shape" });
+      if (gatewayReport.request_nonce !== nonce) throw unavailable({ stage: "report", reason: "nonce-binding" });
+      if (normalizeHex(gatewayReport.tls_cert_fingerprint) !== peerSpki) throw unavailable({ stage: "report", reason: "tls-binding" });
+      if (!cloud && report.model_name !== model) throw unavailable({ stage: "report", reason: "model-binding" });
+      const policyBefore = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
+      if (policyBefore.length > 1_048_576) throw unavailable({ stage: "policy", reason: "size" });
       const verdict = await runNearVerifier(options, cloud
         ? { attestation: report, model, nonce, tlsSpkiSha256: peerSpki }
         : { attestation: report, nonce, tlsSpkiSha256: peerSpki }, signal, cloud);
       const now = Date.now();
-      if (normalizeHex(verdict.tlsSpkiSha256) !== peerSpki
-        || (!cloud && (typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase()))
-        || (!cloud && verdict.allowedSigners !== undefined && (verdict.allowedSigners.length !== 1
+      if (normalizeHex(verdict.tlsSpkiSha256) !== peerSpki) throw unavailable({ stage: "session", reason: "tls-binding" });
+      if (!cloud && (typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase())) throw unavailable({ stage: "session", reason: "signer" });
+      if ((!cloud && verdict.allowedSigners !== undefined && (verdict.allowedSigners.length !== 1
           || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
-        || (cloud && (!verdict.allowedSigners || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
-        || Date.parse(verdict.verifiedAt) > now + 5_000 || Date.parse(verdict.verifiedAt) < now - 300_000
-        || Date.parse(verdict.expiresAt) <= now || Date.parse(verdict.expiresAt) > Date.parse(verdict.verifiedAt) + 300_000
-        || !policyBefore.equals(await readFile(options.policyPath))) throw unavailable();
+        || (cloud && (!verdict.allowedSigners || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))) throw unavailable({ stage: "session", reason: "signer-set" });
+      if (Date.parse(verdict.verifiedAt) > now + 5_000 || Date.parse(verdict.verifiedAt) < now - 300_000
+        || Date.parse(verdict.expiresAt) <= now || Date.parse(verdict.expiresAt) > Date.parse(verdict.verifiedAt) + 300_000) throw unavailable({ stage: "session", reason: "time" });
+      const policyAfter = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
+      if (!policyBefore.equals(policyAfter)) throw unavailable({ stage: "policy", reason: "changed" });
       attestedSpki = peerSpki;
       const pinnedFetch: NearVerifiedFetch = async (url, init) => {
-        if (url.origin !== base.origin || Date.parse(verdict.expiresAt) <= Date.now()) throw unavailable();
-        const wire = await requestBytes(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "accept-encoding": "identity" } }, bootstrapAgent);
-        if (wire.peerSpki !== peerSpki || wire.response.headers.get("content-encoding") && wire.response.headers.get("content-encoding") !== "identity") throw unavailable();
+        if (url.origin !== base.origin) throw unavailable({ stage: "session", reason: "origin" });
+        if (Date.parse(verdict.expiresAt) <= Date.now()) throw unavailable({ stage: "session", reason: "expired" });
+        let wire: WireResponse;
+        try { wire = await requestBytes(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "accept-encoding": "identity" } }, bootstrapAgent); }
+        catch (error) { throw transportFailure(error, init.signal); }
+        if (wire.peerSpki !== peerSpki) throw unavailable({ stage: "session", reason: "tls-binding" });
+        if (wire.response.headers.get("content-encoding") && wire.response.headers.get("content-encoding") !== "identity") throw unavailable({ stage: "transport", reason: "encoding" });
         return wire.response;
       };
       const session = {
@@ -194,7 +308,10 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
       };
       handedOff = true;
       return session;
-    } catch { throw unavailable(); }
+    } catch (error) {
+      if (error instanceof NearAttestationError) throw error;
+      throw transportFailure(error, signal);
+    }
     finally { if (!handedOff) bootstrapAgent.destroy(); }
   };
 }

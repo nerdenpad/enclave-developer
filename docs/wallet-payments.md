@@ -1,6 +1,6 @@
 # Wallet connections and real USDC
 
-The final domain is **enclaveagent.tech**. The selected payment network is **Arc Mainnet (5042)**. Wallet connection is implemented separately from payments. Real-USDC settlement still requires contract deployment, funded operator wallets and payment acceptance. See the [Arc deployment profile](arc-deployment.md).
+The final domain is **enclaveagent.tech**. The selected payment network is **Arc Mainnet (5042)**. The hosted backend runs the accepted NEAR + Arc production profile. Wallet connection is implemented separately from payments. Public checkout is enabled at the approved **0.10 USDC per request**. A real operator WalletConnect browser session passed wallet sign-in, navigation/reload, one payment, one inference, receipt export and independent Arc verification. Manual wallet acceptance: passed, confirmed by the project owner on **3 October 2026**. Live settlement interruption, signer rotation and model revocation acceptance remain open, so E1 public launch remains open. See the [Arc deployment profile](arc-deployment.md) and [release progress](release-progress.md).
 
 ## Implemented connection
 
@@ -8,7 +8,7 @@ The dashboard uses the direct WalletConnect Sign Client, with an Enclave-owned d
 
 Account and network changes update the browser-wallet display. A WalletConnect approval change invalidates the session and requires reconnection. Cancellation ignores late approvals and closes any late remote session. The dialog supports keyboard navigation, Escape and focus restoration.
 
-Browser extensions work without a Project ID. Remote pairing and the catalog use the public `VITE_WALLETCONNECT_PROJECT_ID` in `frontend/.env.local` at build time. Configure the project and domain allowlist through WalletConnect/Reown; see [the Explorer API requirements](https://docs.reown.com/cloud/explorer). The supplied project is configured on the hosted pilot. On 24 September 2026, a live browser check loaded 77 Arc-filtered directory entries, received a successful relay response, displayed a pairing QR code and cancelled pairing with focus restoration. No wallet approval, signature or payment was performed. End-to-end approval on real wallets and payment compatibility remain separate acceptance steps.
+Browser extensions work without a Project ID. Remote pairing and the catalog use the public `VITE_WALLETCONNECT_PROJECT_ID` in `frontend/.env.local` at build time. Configure the project and domain allowlist through WalletConnect/Reown; see [the Explorer API requirements](https://docs.reown.com/cloud/explorer). The supplied project is configured on the accepted hosted deployment. On 24 September 2026, a live browser check loaded 77 Arc-filtered directory entries, received a successful relay response, displayed a pairing QR code and cancelled pairing with focus restoration. No wallet approval, signature or payment was performed in that historical check; the later protocol and manual acceptance records are described below.
 
 WalletConnect pairing requests Arc Mainnet. An installed browser wallet can connect on its current network; a separate **Switch to Arc** action requests a network change and, if needed, adds the reviewed Arc configuration. The returned chain ID is checked. No USDC balance or real payment is displayed until settlement is configured.
 
@@ -20,9 +20,30 @@ After connecting on Arc, choose **Sign in with connected wallet**. This requests
 
 The backend verifies the signature against its stored message and atomically consumes the nonce. Each wallet has a stable private workspace identity. A random session lasts 30 minutes; only its hash is stored in PostgreSQL. The browser keeps the bearer in memory and a durable copy in a Secure, HttpOnly, SameSite=Strict cookie scoped to `/api/v1/auth/wallet`. Origin-checked POST resume verifies the selected address and existing expiry before restoring the workspace. Navigation and reload do not require a new signature or extend expiry. Logout revokes the session; changing the wallet or network clears the workspace. A public selection hint is stored in localStorage, but no login token, API key or payment signature is stored there.
 
-Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions on the pilot can inspect their own workspace; inference and payments require the separately configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. This is not evidence of completed paid or hardware acceptance.
+Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions can inspect their own workspace and use the configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. Login itself is not a payment or hardware proof.
 
-Published and checked on 25 September 2026 at `enclaveagent.tech`: an unfunded browser wallet fixture signed in, loaded its empty workspace, could not submit a pilot settlement, and lost access after an account change. The PostgreSQL integration covered concurrent replay, stable ownership across logins, separate identities, expiry and revocation. The hosted WalletConnect check still returned 77 catalog entries and a working QR relay. Approval in actual wallet apps and real payments remain separate acceptance steps.
+Published and checked on 25 September 2026 at `enclaveagent.tech`: an unfunded browser wallet fixture signed in, loaded its empty workspace, could not submit a pilot settlement, and lost access after an account change. The PostgreSQL integration covered concurrent replay, stable ownership across logins, separate identities, expiry and revocation. The hosted WalletConnect check still returned 77 catalog entries and a working QR relay. These historical checks did not exercise an actual wallet-app payment.
+
+On 1 October 2026, the browser completed actual WalletConnect pairing and SIWE
+login, returned from home to the dashboard, and restored the same login after
+reload without another signature. The operator wallet approved one **0.10 USDC**
+authorization; the browser sent one settlement and one paid inference request,
+verified the response/receipt, and exported JSON and owner CSV. Canonical Arc
+events and policy version 2 passed independent checks. The wallet key remained
+in a protected local operator helper; no key was sent to the browser or server.
+This exercises the real WalletConnect protocol with an operator EOA, not a
+physical wallet-app UI.
+
+Manual wallet acceptance: passed, confirmed by the project owner on
+**3 October 2026**. Interruption during live settlement and recovery, signer
+rotation and model revocation remain separate open acceptance scenarios.
+
+Across the API and browser acceptance runs, confirmed usage is **three calls and
+0.30 USDC**, each with its own intent and one settlement. The third API request
+returned complete final content `READY` with `finish_reason: stop` under reviewed
+provider policy version 5, thinking enabled and a 512-token cap. The earlier
+32-token protocol tests could truncate reasoning and do not establish complete
+final-answer quality.
 
 Run the additive database migration before setting `WALLET_AUTH_ORIGIN=https://enclaveagent.tech` on the API. Without this setting, public login is disabled. Login requests require the matching Origin header and have a 4 KB body limit, a 120-request/minute per-process ceiling, five outstanding challenges per address and ten active sessions per address. Multi-replica or high-volume deployments need a shared perimeter rate limiter. Test PostgreSQL behavior with `node --env-file=.env.demo --import tsx scripts/test-wallet-login.ts` from `_backend`; it creates and removes only a random test schema.
 
@@ -55,7 +76,7 @@ The current backend x402 v2 path supports EIP-3009 authorizations from externall
 ## Required deployment configuration
 
 - WalletConnect/Reown project ID and the `enclaveagent.tech` domain allowlist. The application metadata already uses that domain.
-- Arc Mainnet is selected; the official RPC and USDC EIP-712 domain pass the read-only preflight. Production RPC capacity, finality policy and transaction acceptance still need verification.
+- Arc Mainnet is selected; the official RPC and USDC EIP-712 domain pass preflight. Real settlement and receipt anchors passed canonical event checks with the configured positive confirmation policy. Operational RPC capacity and remaining live failure/reorganization scenarios still need acceptance.
 - Deployed Enclave contracts, recipient and funded relay wallet, with their addresses published in the deployment record.
 - Enable the migrated server-side SIWE login and verify ownership/session expiry; an operator API key must not be shipped to public browsers.
 

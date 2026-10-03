@@ -1,6 +1,7 @@
-import { isConfiguredAddress } from "@enclave/core";
-import { keccak256, stringToHex, type Hex } from "viem";
+import type { Hex } from "viem";
 import { z } from "zod";
+
+export { indexerScope } from "@enclave/core";
 
 export type Checkpoint = { number: bigint; hash: Hex };
 export type ChainHeader = Checkpoint & { parentHash: Hex };
@@ -49,22 +50,4 @@ export function checkpointTail(previous: Checkpoint[], headers: ChainHeader[], s
     tail.push({ number: header.number, hash: header.hash });
   }
   return tail.slice(-size);
-}
-
-export function indexerScope(input: {
-  chainId: number;
-  genesisHash: Hex;
-  deploymentId?: string | undefined;
-  verifier?: string | undefined;
-  meter?: string | undefined;
-  feeVault?: string | undefined;
-  registry?: string | undefined;
-}): string {
-  const normalize = (value: string | undefined) => isConfiguredAddress(value) ? value.toLowerCase() : null;
-  const identity = {
-    genesis: input.genesisHash.toLowerCase(), deployment: input.deploymentId ?? "",
-    verifier: normalize(input.verifier), meter: normalize(input.meter),
-    feeVault: normalize(input.feeVault), registry: normalize(input.registry),
-  };
-  return `enclave-v2:${input.chainId}:${keccak256(stringToHex(JSON.stringify(identity)))}`;
 }

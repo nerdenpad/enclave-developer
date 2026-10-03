@@ -1,11 +1,12 @@
-import { createPublicClient, http, keccak256, parseAbi, parseEventLogs, stringToHex, type Hex } from "viem";
+import { apiRpcTransport } from "./rpc-transport.js";
+import { createPublicClient,  keccak256, parseAbi, parseEventLogs, stringToHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ConflictError, usdcToUnits, validateProductionRelease } from "@enclave/core";
 import { payments, receipts, type Database } from "@enclave/db";
 import type { Config } from "./config.js";
-import { runNearVerifier } from "./near-provider.js";
+import { runNearVerifier, nvidiaVerifierOptions } from "./near-provider.js";
 
 export type AcceptedRelease = Awaited<ReturnType<typeof validateProductionRelease>>;
 const verifierAbi = parseAbi([
@@ -39,7 +40,7 @@ export function assertReleaseConfiguration(config: Config, release: AcceptedRele
 
 /** Read-only acceptance check. Never signs or submits a transaction. */
 export async function verifyReleaseChain(config: Config, release: AcceptedRelease, paymentId: string): Promise<void> {
-  const rpc = createPublicClient({ transport: http(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 0 }), cacheTime: 0 });
+  const rpc = createPublicClient({ transport: apiRpcTransport(config, { timeout: 15_000, retryCount: 0 }), cacheTime: 0 });
   const verifier = config.ATTESTATION_VERIFIER_ADDRESS as Hex;
   const meter = config.USAGE_METER_ADDRESS as Hex;
   if (await rpc.getChainId() !== release.manifest.chainId) throw new ConflictError("Production RPC chain mismatch");
@@ -123,6 +124,7 @@ export async function verifyAcceptedProviderEvidence(config: Config, release: Ac
     }
   } catch { throw new ConflictError("Accepted inference lacks a replayable hardware evidence archive"); }
   const verdict = await runNearVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY!,
+    ...nvidiaVerifierOptions(config),
     policySha256: config.NEAR_ATTESTATION_POLICY_SHA256! }, {
     nonce, tlsSpkiSha256: archive.verdict.tlsSpkiSha256,
     ...(cloud ? { model: config.INFERENCE_MODEL } : {}), attestation: archive.report, archivedVerdict: archive.verdict,

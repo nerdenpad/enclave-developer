@@ -6,6 +6,7 @@ import { VerifyReceiptPage } from "./VerifyReceiptPage";
 import { DeploymentStatusPage } from "./DeploymentStatusPage";
 import { ModelRegistryPage } from "./ModelRegistryPage";
 import { WalletConnectControl } from "./WalletConnectControl";
+import { PublicDeploymentNotice } from "./PublicDeploymentNotice";
 
 const pages = import.meta.glob("./pages/*.html", {
   query: "?raw",
@@ -88,7 +89,7 @@ export function EnclavePage({ pathname }: { pathname: string }) {
   return (
     <>
       {path === "/" ? <style dangerouslySetInnerHTML={{ __html: homeStyles }} /> : null}
-      {path !== "/dashboard/" && <aside className="deployment-notice" aria-label="Release status">Development pilot · Local test settlement · <a href="/status">View deployment status</a></aside>}
+      {path !== "/dashboard/" && <PublicDeploymentNotice pathname={path} />}
       <div id="site-document" style={{ display: "contents" }} dangerouslySetInnerHTML={{ __html: markup }} />
       {path === "/dashboard/" ? <WalletConnectControl /> : null}
     </>

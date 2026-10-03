@@ -29,6 +29,7 @@ export { createOpenAICompatibleInference, type InferenceAdapter, type OpenAIComp
 export { createNearInference, verifyNearTranscript, type NearInferenceAdapter, type NearInferenceEvidence, type NearAttestationVerifier, type NearVerifiedFetch, type NearVerifiedSession } from "./near-inference.js";
 export { signProviderProof, verifyProviderProof, providerEvidenceHash, canonicalEvidenceJson, type ProviderProof, type ProviderTranscript } from "./provider-proof.js";
 export { isConfiguredAddress } from "./addresses.js";
+export { indexerScope } from "./indexer-scope.js";
 export { bannedSecretFields, secretMaterialHits } from "./secrets.js";
 export { USDC_DECIMALS, type X402Requirement, usdcToUnits, paymentRequiredBody } from "./x402.js";
 export { reserveMandate, type MandateSnapshot } from "./mandate.js";

@@ -15,10 +15,22 @@ describe("loadConfig", () => {
     expect(cfg.API_PORT).toBe(8787);
     expect(cfg.TEE_MODE).toBe("dev");
     expect(cfg.NEAR_ENDPOINT_PROFILE).toBe("cloud");
+    expect(cfg.NEAR_ENABLE_THINKING).toBe(false);
     expect(cfg.INFERENCE_ALLOW_REMOTE).toBe(false);
     expect(cfg.INFERENCE_API_KEY).toBeUndefined();
     expect(cfg.INFERENCE_HEALTH_PATH).toBeUndefined();
     expect(cfg.INFERENCE_TIMEOUT_MS).toBe(30_000);
+    expect(cfg.ARC_RPC_MAX_RPS).toBe(20);
+  });
+
+  it("defaults to a shared two request budget on nonlocal chains and accepts a bounded override", () => {
+    expect(loadConfig({ DATABASE_URL: "postgres://test/db", DEPLOYER_PRIVATE_KEY: `0x${"12".repeat(32)}`, ARC_CHAIN_ID: "5042" }).ARC_RPC_MAX_RPS).toBe(2);
+    expect(loadConfig({ DATABASE_URL: "postgres://test/db", ARC_CHAIN_ID: "1337" }).ARC_RPC_MAX_RPS).toBe(20);
+    expect(loadConfig({ DATABASE_URL: "postgres://test/db", DEPLOYER_PRIVATE_KEY: `0x${"12".repeat(32)}`, ARC_CHAIN_ID: "5042", ARC_RPC_MAX_RPS: "1" }).ARC_RPC_MAX_RPS).toBe(1);
+  });
+
+  it.each(["0", "21", "1.5", "NaN", ""])("rejects an invalid RPC request budget %s", ARC_RPC_MAX_RPS => {
+    expect(() => loadConfig({ DATABASE_URL: "postgres://test/db", ARC_RPC_MAX_RPS })).toThrow("Invalid env");
   });
 
   it("fails closed instead of starting a software CVM in production", () => {
@@ -118,6 +130,26 @@ describe("verified NEAR configuration", () => {
       NEAR_VERIFIER_PYTHON: "python", NEAR_ATTESTATION_POLICY: "/fixture/policy.json" });
     expect(loadConfig({ ...configured, NEAR_MAX_TOKENS: "64", INFERENCE_HEALTH_PATH: "" }).NEAR_MAX_TOKENS).toBe(64);
     expect(loadConfig({ ...configured, INFERENCE_BASE_URL: "https://cloud-api.near.ai/v1" }).INFERENCE_BASE_URL).toBe("https://cloud-api.near.ai/v1");
+  });
+
+  it.each(["true", "false"])("parses explicit NEAR thinking %s without Boolean string coercion", (value) => {
+    expect(loadConfig({ ...configured, NEAR_ENABLE_THINKING: value }).NEAR_ENABLE_THINKING).toBe(value === "true");
+  });
+
+  it.each(["yes", "1", "0", "TRUE", ""])("rejects invalid NEAR thinking %s", (value) => {
+    expect(() => loadConfig({ ...configured, NEAR_ENABLE_THINKING: value })).toThrow("NEAR_ENABLE_THINKING");
+  });
+
+  it("requires an explicitly selected local NVIDIA verifier with absolute artifact paths", () => {
+    expect(loadConfig({ ...configured, NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: "/reviewed/bin/nvattest",
+      NVIDIA_NVAT_LIBRARY: "/reviewed/lib/libnvat.so.1.2.2" })).toMatchObject({ NVIDIA_VERIFIER_MODE: "local" });
+    for (const change of [{ NVIDIA_VERIFIER_MODE: "local" }, { NVIDIA_VERIFIER_MODE: "auto" },
+      { NVIDIA_NVAT_BINARY: "/unreviewed/nvattest" },
+      { NVIDIA_VERIFIER_MODE: "local", NVIDIA_NVAT_BINARY: "relative/nvattest", NVIDIA_NVAT_LIBRARY: "/reviewed/libnvat.so" }]) {
+      expect(() => loadConfig({ ...configured, ...change })).toThrow("Invalid env");
+    }
+    expect(() => loadConfig({ DATABASE_URL: configured.DATABASE_URL, NVIDIA_VERIFIER_MODE: "local",
+      NVIDIA_NVAT_BINARY: "/reviewed/bin/nvattest", NVIDIA_NVAT_LIBRARY: "/reviewed/lib/libnvat.so" })).toThrow("verified NEAR");
   });
 
   it.each([

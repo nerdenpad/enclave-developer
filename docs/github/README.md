@@ -1,6 +1,6 @@
 # GitHub presentation
 
-Public pages follow the same shape as [UseCert](https://github.com/UseCert): a short profile, a repository README that states the pilot limits in the opening, and an About box that matches that wording.
+Public pages follow the same shape as [UseCert](https://github.com/UseCert): a short profile, a repository README that states the accepted production deployment and remaining E1 acceptance in the opening, and an About box that matches that wording.
 
 ## Repository
 
@@ -8,7 +8,9 @@ The root [README](../../README.md) is the public entry point. Detailed setup sta
 
 About description:
 
-> Inference with signed receipts and independently checked evidence. Arc settlement is configured; public checkout remains gated by end-to-end acceptance.
+> NEAR + Arc production inference with signed receipts and checked evidence. Public checkout is enabled at 0.10 USDC per request; final E1 failure acceptance remains open.
+
+Manual wallet acceptance: passed, confirmed by the project owner on 3 October 2026. Live settlement interruption, signer rotation and model revocation acceptance remain open. Keep this distinction in the public release status.
 
 Website: https://enclaveagent.tech
 
@@ -22,6 +24,6 @@ Pin `enclave-developer`. Keep the frontend and backend together on `main`.
 
 ## At release
 
-Update the dated pilot status in the repository README, the profile README, the roadmap and the E1 acceptance document from the same deployment evidence. Publish a tagged release only when its stated acceptance criteria pass.
+Update the dated release status in the repository README, the profile README, the roadmap and the E1 acceptance document from the same deployment evidence. Publish a tagged release only when its stated acceptance criteria pass.
 
 The public view should distinguish shipped behavior, current limitations and planned work. No license has been added.

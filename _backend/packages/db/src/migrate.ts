@@ -2,6 +2,7 @@ import postgres from "postgres";
 import { WALLET_AUTH_SQL } from "./wallet-auth-schema.js";
 import { config as loadDotenv } from "dotenv";
 import { AGENT_RUNTIME_SQL } from "./agent-runtime-schema.js";
+import { INFERENCE_EXECUTION_SQL } from "./inference-execution-schema.js";
 
 loadDotenv({ path: new URL("../../../.env", import.meta.url) });
 loadDotenv();
@@ -222,6 +223,7 @@ await sql.begin(async (tx) => {
   await tx.unsafe(UPGRADES);
   await tx.unsafe(AGENT_RUNTIME_SQL);
   await tx.unsafe(WALLET_AUTH_SQL);
+  await tx.unsafe(INFERENCE_EXECUTION_SQL);
 });
 await sql.end();
 console.log("migrated");

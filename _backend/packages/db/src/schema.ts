@@ -9,6 +9,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { agentRuns, agentActions } from "./agent-runtime-schema.js";
+import { inferenceExecutions } from "./inference-execution-schema.js";
 
 export const models = pgTable("models", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -210,6 +211,7 @@ export const schema = {
   sessions,
   payments,
   idempotencyKeys,
+  inferenceExecutions,
   chainEvents,
   indexCursors,
   agents,

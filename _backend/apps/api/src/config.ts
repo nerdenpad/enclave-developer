@@ -2,7 +2,7 @@ import { z } from "zod";
 import { isAbsolute } from "node:path";
 import { withRelayKey } from "@enclave/core/relay-key";
 import { createOpenAICompatibleInference, isConfiguredAddress } from "@enclave/core";
-import { nearBaseUrl } from "./near-provider.js";
+import { nearBaseUrl, nvidiaVerifierOptions } from "./near-provider.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -13,8 +13,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().default("redis://127.0.0.1:6379"),
   ARC_RPC_URL: z.string().default("http://127.0.0.1:8545"),
+  ARC_RPC_MAX_RPS: z.coerce.number().int().min(1).max(20).optional(),
   ARC_CHAIN_ID: z.coerce.number().int().positive().default(31337),
   CHAIN_CONFIRMATIONS: z.coerce.number().int().min(0).max(1000).optional(),
+  CHAIN_DEPLOYMENT_ID: z.string().min(1).optional(),
   ATTESTATION_VERIFIER_ADDRESS: z
     .string()
     .default("0x0000000000000000000000000000000000000001"),
@@ -48,10 +50,14 @@ const envSchema = z.object({
   INFERENCE_HEALTH_PATH: z.string().optional(),
   INFERENCE_TIMEOUT_MS: z.coerce.number().int().positive().max(300_000).default(30_000),
   NEAR_VERIFIER_PYTHON: z.string().min(1).optional(),
+  NVIDIA_VERIFIER_MODE: z.enum(["nras", "local"]).default("nras"),
+  NVIDIA_NVAT_BINARY: z.string().min(1).optional(),
+  NVIDIA_NVAT_LIBRARY: z.string().min(1).optional(),
   NEAR_ATTESTATION_POLICY: z.string().min(1).optional(),
   NEAR_ATTESTATION_POLICY_SHA256: z.string().regex(/^0x[0-9a-f]{64}$/).optional(),
   NEAR_ENDPOINT_PROFILE: z.enum(["cloud", "direct-experimental"]).default("cloud"),
   NEAR_MAX_TOKENS: z.coerce.number().int().positive().max(4096).default(512),
+  NEAR_ENABLE_THINKING: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   AGENT_RUNTIME_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   AGENT_RUNTIME_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(1000),
   AGENT_RUNTIME_MAX_STEPS: z.coerce.number().int().min(1).max(100).default(8),
@@ -114,6 +120,8 @@ const envSchema = z.object({
     }
   }
   if (env.INFERENCE_BACKEND === "near-verified") {
+    try { nvidiaVerifierOptions(env); }
+    catch { ctx.addIssue({ code: "custom", path: ["NVIDIA_VERIFIER_MODE"], message: "NVIDIA verifier mode and artifact paths must be explicit and valid" }); }
     try { nearBaseUrl(env.INFERENCE_BASE_URL); }
     catch { ctx.addIssue({ code: "custom", path: ["INFERENCE_BASE_URL"], message: "NEAR requires an approved HTTPS endpoint" }); }
     if (!env.INFERENCE_ALLOW_REMOTE) ctx.addIssue({ code: "custom", path: ["INFERENCE_ALLOW_REMOTE"], message: "NEAR requires explicit remote inference opt-in" });
@@ -122,6 +130,9 @@ const envSchema = z.object({
       if (!env[field]) ctx.addIssue({ code: "custom", path: [field], message: "NEAR hardware verifier runtime and versioned policy are required" });
     }
     if (env.INFERENCE_HEALTH_PATH) ctx.addIssue({ code: "custom", path: ["INFERENCE_HEALTH_PATH"], message: "NEAR verifies attestation before inference; clear the Modal health path" });
+  }
+  if (env.NVIDIA_VERIFIER_MODE === "local" && env.INFERENCE_BACKEND !== "near-verified") {
+    ctx.addIssue({ code: "custom", path: ["NVIDIA_VERIFIER_MODE"], message: "Local NVIDIA verification requires verified NEAR inference" });
   }
 });
 
@@ -132,5 +143,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!parsed.success) {
     throw new Error(`Invalid env: ${parsed.error.message}`);
   }
-  return parsed.data;
+  return { ...parsed.data, ARC_RPC_MAX_RPS: parsed.data.ARC_RPC_MAX_RPS ?? ([31337, 1337].includes(parsed.data.ARC_CHAIN_ID) ? 20 : 2) };
 }

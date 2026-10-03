@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, zeroAddress, zeroHash, type Hex } from "viem";
+import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, http, zeroAddress, zeroHash, type Hex } from "viem";
 import type { Database } from "@enclave/db";
 import { createEconomicOps, createFacilitator, createRegistryApproval, paymentIdToBytes32, type PaymentAuthorization } from "./chain.js";
 import { loadConfig, type Config } from "./config.js";
@@ -12,6 +12,7 @@ vi.mock("viem", async (original) => ({
   // Each wallet owns its methods: wrapping a durable wallet must not mutate another client.
   createWalletClient: vi.fn(() => ({ extend: () => ({ ...rpc }) })),
   createPublicClient: vi.fn(() => publicRpc),
+  http: vi.fn(() => ({ name: "mock-transport" })),
 }));
 vi.mock("@enclave/db", async (original) => ({
   ...await original<typeof import("@enclave/db")>(),
@@ -111,10 +112,14 @@ describe("durable signer adapter policy", () => {
     const db = {} as Database;
     const cfg = config(depth === undefined ? {} : { CHAIN_CONFIRMATIONS: depth });
     await createFacilitator(cfg, db).settle(paymentId, 500n, false, { mode: "authorized", authorization });
-    const options = { db, rpcUrl: cfg.ARC_RPC_URL, chainId: cfg.ARC_CHAIN_ID, privateKey: cfg.DEPLOYER_PRIVATE_KEY,
+    const options = { db, fetchFn: expect.any(Function), rpcUrl: cfg.ARC_RPC_URL, chainId: cfg.ARC_CHAIN_ID, privateKey: cfg.DEPLOYER_PRIVATE_KEY,
       ...(depth === undefined ? {} : { confirmations: depth }) };
     expect(journal.send).toHaveBeenCalledExactlyOnceWith(options, `payment:${paymentId}:0`, expect.objectContaining({ functionName: "settleAuthorized" }));
     expect(journal.confirm).toHaveBeenCalledExactlyOnceWith(options, txHash);
+    const fetchFn = vi.mocked(http).mock.calls[0]![1]!.fetchFn;
+    expect(fetchFn).toBeTypeOf("function");
+    expect(journal.send.mock.calls[0]![0].fetchFn).toBe(fetchFn);
+    expect(journal.confirm.mock.calls[0]![0].fetchFn).toBe(fetchFn);
     expect(rpc.writeContract).not.toHaveBeenCalled();
     expect(rpc.waitForTransactionReceipt).not.toHaveBeenCalled();
   });

@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:motion": "playwright test --config playwright.motion.config.ts"
   },
   "overrides": {
     "rolldown": "1.2.1"

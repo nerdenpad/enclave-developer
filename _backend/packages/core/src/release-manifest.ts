@@ -15,8 +15,8 @@ const signature = z.string().regex(/^0x[0-9a-fA-F]{130}$/).transform(value => va
 const utc = z.string().datetime();
 const modelId = z.string().min(1).max(512).refine(value => value.trim() === value && !/[\u0000-\u001f\u007f:]/.test(value));
 const filePath = z.string().min(1).max(4096).refine(value => value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value) && !/^[a-z]+:\/\//i.test(value));
-const positiveUnits = z.string().regex(/^[1-9][0-9]{0,77}$/).refine(value => BigInt(value) <= (1n << 256n) - 1n);
-const uint64 = z.string().regex(/^(0|[1-9][0-9]{0,19})$/).refine(value => BigInt(value) <= (1n << 64n) - 1n);
+const positiveUnits = z.string().regex(/^[1-9][0-9]{0,77}$/).refine(value => /^[1-9][0-9]{0,77}$/.test(value) && BigInt(value) <= (1n << 256n) - 1n);
+const uint64 = z.string().regex(/^(0|[1-9][0-9]{0,19})$/).refine(value => /^(0|[1-9][0-9]{0,19})$/.test(value) && BigInt(value) <= (1n << 64n) - 1n);
 const exactHttpsOrigin = z.string().url().refine(value => {
   const url = new URL(value);
   return url.protocol === "https:" && value === url.origin && !url.username && !url.password;
@@ -52,6 +52,9 @@ export const productionProviderPolicySchema = z.object({
   schemaVersion: z.literal(1), version: z.string().min(1).max(128), validFrom: utc, validUntil: utc,
   maxSessionSeconds: z.number().int().min(1).max(300), profiles: z.array(modelProfileSchema).min(1).max(32),
   gatewayProfiles: z.array(gatewayProfileSchema).min(1).max(32).optional(),
+  nvidiaVerifier: z.object({ mode: z.literal("local"), sdkVersion: z.literal("1.2.2"),
+    binarySha256: z.literal("ef4d6b63fc898081d45f39d836848b32e9579202c7b64664aa38350649c09ff6"),
+    librarySha256: z.literal("088b827f0ce9f356afd4afcb27c22bfd71409268e7fc6d987b3331ca8d2a5c24") }).strict().optional(),
   provenance: z.object({ status: z.literal("APPROVED"), scope: z.literal("production"), reviewedAt: utc,
     reviewedBy: z.string().trim().min(1).max(256) }).passthrough(),
 }).strict();

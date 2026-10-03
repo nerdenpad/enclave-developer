@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "./hash.js";
 import { signProviderProof } from "./provider-proof.js";
 import { receiptTypedHash, signReceipt } from "./receipt.js";
-import { productionInferenceArchiveSchema, ProductionReleaseError, validateProductionRelease,
+import { productionInferenceArchiveSchema, productionProviderPolicySchema, productionReleaseManifestSchema, ProductionReleaseError, validateProductionRelease,
   type ProductionProviderPolicy, type ProductionReleaseManifest } from "./release-manifest.js";
 import { tcbPolicyRecord } from "./tcb.js";
 
@@ -20,6 +20,38 @@ let directory: string, manifest: ProductionReleaseManifest, policy: ProductionPr
 let gatewayKey: `0x${string}`;
 const path = () => join(directory, "manifest.json");
 const signedReceipt = () => ({ ...archive.receipt, ts: BigInt(archive.receipt.ts) });
+
+describe("release numeric boundaries", () => {
+  it.each(["invalid", "1.2", "-1", "1e6", "0x10", "", " ", "01", "9".repeat(90)])("rejects malformed decimal units and timestamps without throwing: %s", value => {
+    expect(() => productionReleaseManifestSchema.shape.acceptedPayment.shape.amountUnits.safeParse(value)).not.toThrow();
+    expect(productionReleaseManifestSchema.shape.acceptedPayment.shape.amountUnits.safeParse(value).success).toBe(false);
+    expect(() => productionInferenceArchiveSchema.shape.receipt.shape.ts.safeParse(value)).not.toThrow();
+    expect(productionInferenceArchiveSchema.shape.receipt.shape.ts.safeParse(value).success).toBe(false);
+  });
+  it("keeps exact uint256 and uint64 limits", () => {
+    const units = productionReleaseManifestSchema.shape.acceptedPayment.shape.amountUnits;
+    const timestamp = productionInferenceArchiveSchema.shape.receipt.shape.ts;
+    expect(units.safeParse(((1n << 256n) - 1n).toString()).success).toBe(true);
+    expect(units.safeParse((1n << 256n).toString()).success).toBe(false);
+    expect(timestamp.safeParse(((1n << 64n) - 1n).toString()).success).toBe(true);
+    expect(timestamp.safeParse((1n << 64n).toString()).success).toBe(false);
+  });
+});
+
+describe("explicit NVIDIA verifier policy", () => {
+  const pinned = { mode: "local", sdkVersion: "1.2.2",
+    binarySha256: "ef4d6b63fc898081d45f39d836848b32e9579202c7b64664aa38350649c09ff6",
+    librarySha256: "088b827f0ce9f356afd4afcb27c22bfd71409268e7fc6d987b3331ca8d2a5c24" };
+  it("accepts the pinned local implementation separately from the default NRAS profile", () => {
+    expect(productionProviderPolicySchema.safeParse(policy).success).toBe(true);
+    expect(productionProviderPolicySchema.parse({ ...policy, nvidiaVerifier: pinned }).nvidiaVerifier).toEqual(pinned);
+  });
+  it.each([{ mode: "auto" }, { mode: "nras" }, { sdkVersion: "unreviewed" }, { binarySha256: "00".repeat(32) },
+    { librarySha256: "00".repeat(32) }, { skipOcsp: true }, { nrasUrl: "https://attacker.invalid" }])(
+    "rejects verifier changes and permissive settings %#", change => {
+      expect(productionProviderPolicySchema.safeParse({ ...policy, nvidiaVerifier: { ...pinned, ...change } }).success).toBe(false);
+    });
+});
 async function save() {
   const policyBytes = Buffer.from(JSON.stringify(policy));
   manifest.providerPolicy.sha256 = sha256Hex(policyBytes);

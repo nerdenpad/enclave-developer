@@ -64,7 +64,10 @@ import type { Logger } from "./logger.js";
 import { loadOrCreateCvmKeys, storedToBuffers } from "./cvm-store.js";
 import { authorizationData, validateAuthorization } from "./authorization.js";
 import { settlementScope, verifySettlementProof } from "./settlement-proof.js";
-import { createNearAttestationVerifier } from "./near-provider.js";
+import { modelRegistryScope } from "./model-registry-scope.js";
+import { claimInferenceExecution, completeInferenceExecution, runClaimedInference } from "./inference-execution.js";
+import { verifyRuntimeContractWiring } from "./runtime-contract-wiring.js";
+import { createNearAttestationVerifier, nvidiaVerifierOptions } from "./near-provider.js";
 import { assertAcceptedRelease, releaseIsFresh, verifyAcceptedProviderEvidence, type AcceptedRelease } from "./release-profile.js";
 import { TcbLifecycle, createTcbStore, assertCurrentTcb, type TcbState } from "./tcb-lifecycle.js";
 import { createTcbRegistry, verifyTcbApproval } from "./tcb-chain.js";
@@ -138,6 +141,7 @@ function publicAgent(row: typeof agents.$inferSelect) {
 export class EnclaveGateway {
   private tcbLifecycle: TcbLifecycle | undefined;
   private acceptedRelease: AcceptedRelease | undefined;
+  private runtimeContractReady = true;
   constructor(
     private readonly db: Database,
     private cvm: DevCvm,
@@ -167,8 +171,9 @@ export class EnclaveGateway {
         }) } : {}),
         ...(config.INFERENCE_BACKEND === "near-verified" ? { verifiedInference: createNearInference({
           baseUrl: config.INFERENCE_BASE_URL, model: config.INFERENCE_MODEL, apiKey: config.INFERENCE_API_KEY!,
-          timeoutMs: config.INFERENCE_TIMEOUT_MS, maxTokens: config.NEAR_MAX_TOKENS,
+          timeoutMs: config.INFERENCE_TIMEOUT_MS, maxTokens: config.NEAR_MAX_TOKENS, enableThinking: config.NEAR_ENABLE_THINKING,
           verifyAttestation: createNearAttestationVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY!, apiKey: config.INFERENCE_API_KEY!,
+            ...nvidiaVerifierOptions(config),
             ...(config.NEAR_ATTESTATION_POLICY_SHA256 === undefined ? {} : { policySha256: config.NEAR_ATTESTATION_POLICY_SHA256 }) }),
         }) } : {}),
         chainId: config.ARC_CHAIN_ID,
@@ -203,6 +208,7 @@ export class EnclaveGateway {
 
   private async providerPreflight(): Promise<void> {
     const verified = await createNearAttestationVerifier({ pythonPath: this.config.NEAR_VERIFIER_PYTHON!,
+      ...nvidiaVerifierOptions(this.config),
       policyPath: this.config.NEAR_ATTESTATION_POLICY!, policySha256: this.config.NEAR_ATTESTATION_POLICY_SHA256!, apiKey: this.config.INFERENCE_API_KEY! })({
       baseUrl: this.config.INFERENCE_BASE_URL, model: this.config.INFERENCE_MODEL, signal: AbortSignal.timeout(this.config.INFERENCE_TIMEOUT_MS),
     });
@@ -216,10 +222,22 @@ export class EnclaveGateway {
     await this.providerPreflight();
   }
 
+  private async assertRuntimeContractWiring(): Promise<void> {
+    if (this.config.NODE_ENV !== "production") return;
+    try {
+      await verifyRuntimeContractWiring(this.config, this.cvm.enclaveAddress);
+      this.runtimeContractReady = true;
+    } catch (error) {
+      this.runtimeContractReady = false;
+      throw error;
+    }
+  }
+
   private async syncTcb(): Promise<{ cvm: DevCvm; state: TcbState }> {
     if (this.config.NODE_ENV === "production" && (!this.acceptedRelease || !releaseIsFresh(this.acceptedRelease))) {
       throw new ConflictError("Production acceptance or reviewed provider policy expired");
     }
+    await this.assertRuntimeContractWiring();
     const state = await this.lifecycle().current();
     if (this.config.NODE_ENV === "production" && (state.binding !== "onchain"
       || state.policyHash !== this.acceptedRelease!.manifest.policyHash
@@ -242,7 +260,7 @@ export class EnclaveGateway {
   }
 
   health() {
-    const productionReady = this.config.NODE_ENV === "production" && this.acceptedRelease !== undefined && releaseIsFresh(this.acceptedRelease);
+    const productionReady = this.config.NODE_ENV === "production" && this.acceptedRelease !== undefined && releaseIsFresh(this.acceptedRelease) && this.runtimeContractReady;
     const managed = this.config.TEE_MODE === "managed-near";
     return {
       ok: true as const,
@@ -392,12 +410,33 @@ export class EnclaveGateway {
       throw new PaymentRequiredError("USDC payment required", this.paymentChallenge(intent.id));
     }
 
-    const result = await this.db.transaction(async (tx) => {
+    // The external provider cannot participate in a PostgreSQL transaction.
+    // Commit a permanent claim first: a process death after dispatch must never
+    // make the settled payment eligible for another model execution.
+    const executionBinding = { paymentId: input.paymentId, keyHash, requestHash, idempotencyKey: input.idempotencyKey };
+    const execution = this.config.INFERENCE_BACKEND === "echo" ? undefined : await this.db.transaction(async (tx) => {
       if (input.idempotencyKey) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${keyHash}:${input.idempotencyKey}`}))`);
         const replay = await this.loadIdempotent(tx, keyHash, input.idempotencyKey, requestHash);
         if (replay) {
           await assertCurrentTcb(tx, state.policyHash);
+          return { replay };
+        }
+      }
+      await this.consumePayment(tx, keyHash, executionBinding.paymentId, price, requestHash, true);
+      await assertCurrentTcb(tx, state.policyHash);
+      await this.assertServingApproved(tx, cvm, state);
+      return { claimId: await claimInferenceExecution(tx, executionBinding) };
+    });
+    if (execution && "replay" in execution) return execution.replay;
+
+    const publish = () => this.db.transaction(async (tx) => {
+      if (input.idempotencyKey) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${keyHash}:${input.idempotencyKey}`}))`);
+        const replay = await this.loadIdempotent(tx, keyHash, input.idempotencyKey, requestHash);
+        if (replay) {
+          await assertCurrentTcb(tx, state.policyHash);
+          if (execution) await completeInferenceExecution(tx, executionBinding, execution.claimId, replay.typedHash);
           return replay;
         }
       }
@@ -406,6 +445,7 @@ export class EnclaveGateway {
       const { receipt, output: outputBytes, providerProof, providerTranscript } = await cvm.infer(plaintext, { attRef: session.attRef as `0x${string}` });
       // A model may be revoked while the remote inference is in progress.
       await assertCurrentTcb(tx, state.policyHash);
+      await this.assertRuntimeContractWiring();
       await this.assertServingApproved(tx, cvm, state);
       const output = encryptAesGcm(secret, outputBytes);
       const providerEvidence = providerProof && providerTranscript ? {
@@ -484,8 +524,10 @@ export class EnclaveGateway {
         }
       }
 
+      if (execution) await completeInferenceExecution(tx, executionBinding, execution.claimId, typedHash);
       return { receipt, typedHash, outputHash: receipt.outHash, output, ...(providerEvidence ? { providerEvidence } : {}) };
     });
+    const result = execution ? await runClaimedInference(input.paymentId, publish) : await publish();
 
     if (this.queues) {
       await this.queues.receiptAnchorer.add(
@@ -586,10 +628,11 @@ export class EnclaveGateway {
   }
 
   async publicModelRegistry() {
+    const scope = await modelRegistryScope(this.config);
     return this.db.select({ modelHash: models.modelHash, codeHash: models.codeHash,
       version: models.version, approved: models.approved, revoked: models.revoked,
       listingId: models.listingId, createdAt: models.createdAt })
-      .from(models).orderBy(desc(models.createdAt));
+      .from(models).where(eq(models.chainScope, scope)).orderBy(desc(models.createdAt));
   }
 
   async arcReceiptCount() {
@@ -622,7 +665,7 @@ export class EnclaveGateway {
     return paymentRequiredBody({
       network: `arc-${this.config.ARC_CHAIN_ID}`,
       amountUnits: usdcToUnits(this.config.INFERENCE_PRICE_USDC),
-      payTo: this.config.FEE_VAULT_ADDRESS,
+      payTo: this.config.PAYMENT_MODE === "authorized" ? this.config.USAGE_METER_ADDRESS : this.config.FEE_VAULT_ADDRESS,
       asset: this.config.USDC_ADDRESS,
       paymentId,
     });
@@ -1400,7 +1443,7 @@ export class EnclaveGateway {
     return parsed;
   }
 
-  private async consumePayment(tx: Tx, keyHash: string, paymentId: string, amount: bigint, requestHash: string): Promise<void> {
+  private async consumePayment(tx: Tx, keyHash: string, paymentId: string, amount: bigint, requestHash: string, validateOnly = false): Promise<void> {
     const [row] = await tx.select().from(payments).where(eq(payments.id, paymentId)).for("update").limit(1);
     if (!row || row.keyHash !== keyHash) {
       throw new NotFoundError("payment", paymentId);
@@ -1424,6 +1467,7 @@ export class EnclaveGateway {
         ...(auth ? { payer: auth.from } : {}),
       });
     }
+    if (validateOnly) return;
     const updated = await tx
       .update(payments)
       .set({ status: "consumed" })

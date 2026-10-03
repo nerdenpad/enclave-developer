@@ -28,10 +28,11 @@
         <p class="form-error" id="inference-error" role="alert"></p><button class="en-button" id="run-inference" data-requires-connection disabled><span>Run inference</span><b>↗</b></button>
       </form>
       <div id="inference-recovery" hidden role="status">
-        <p class="field-note">The request may already be paid. Retry the same encrypted request and payment instead of creating a new one. Nothing is retried automatically.</p>
+        <p class="field-note" id="recovery-note">The request may already be paid. Retry the same encrypted request and payment instead of creating a new one. Nothing is retried automatically.</p>
         <p class="field-note" id="recovery-payment"></p>
+        <a class="text-link" id="recovery-history" href="/dashboard?view=payments">View payment history</a>
         <div class="dialog-actions"><button class="en-button" id="retry-inference" type="button"><span>Retry same request</span><b>↻</b></button><button class="text-link plain-button" id="dismiss-recovery" type="button">Dismiss recovery</button></div>
-        <p class="field-note">Before dismissing recovery or starting another request, check payment history. Dismissal does not cancel, refund or reverse an earlier payment or inference.</p>
+        <p class="field-note" id="recovery-guidance">Before dismissing recovery or starting another request, check payment history. Dismissal does not cancel, refund or reverse an earlier payment or inference.</p>
       </div>
     </div>
     <div class="inference-side">

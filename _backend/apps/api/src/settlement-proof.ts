@@ -1,11 +1,12 @@
-import { createPublicClient, decodeEventLog, http, keccak256, parseAbi, stringToHex, type Hex } from "viem";
+import { apiRpcTransport } from "./rpc-transport.js";
+import { createPublicClient, decodeEventLog,  keccak256, parseAbi, stringToHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { ConflictError } from "@enclave/core";
 import type { Config } from "./config.js";
 
 const abi = parseAbi(["event Settled(address indexed payer, uint256 amount, bytes32 indexed receiptHash, bool confidentialPath)"]);
-function client(config: Config) { return createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1 }) }); }
+function client(config: Config) { return createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config, { timeout: 15_000, retryCount: 1 }), cacheTime: 0 }); }
 
 export async function settlementScope(config: Config): Promise<string> {
   const rpc = client(config);

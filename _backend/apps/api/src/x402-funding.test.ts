@@ -111,7 +111,7 @@ describe("canonical direct-token x402 funding proof", () => {
     expect(rpc.getTransactionReceipt).toHaveBeenCalledExactlyOnceWith({ hash: txHash });
     expect(rpc.getBlock).toHaveBeenCalledExactlyOnceWith({ blockNumber: 100n });
     expect(createPublicClient).toHaveBeenCalledWith(expect.objectContaining({ chain: expect.objectContaining({ id: config.ARC_CHAIN_ID }), cacheTime: 0 }));
-    expect(http).toHaveBeenCalledWith(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1 });
+    expect(http).toHaveBeenCalledWith(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1, batch: false, fetchFn: expect.any(Function) });
   });
 
   it("rejects an RPC serving a different chain before inspecting funding", async () => {

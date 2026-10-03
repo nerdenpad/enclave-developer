@@ -1,4 +1,5 @@
-import { createPublicClient, getAddress, http, maxUint256, parseAbi, parseEventLogs, zeroHash, type Hex } from "viem";
+import { apiRpcFetch, apiRpcTransport } from "./rpc-transport.js";
+import { createPublicClient, getAddress,  maxUint256, parseAbi, parseEventLogs, zeroHash, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { AppError, ConflictError, isConfiguredAddress, ValidationError } from "@enclave/core";
@@ -32,7 +33,7 @@ function unavailable(): AppError { return new AppError("TCB_BINDING_UNAVAILABLE"
 
 /** Explicit immutable commitments only. No local bypass or independent hardware verification is implied. */
 export function createTcbRegistry(config: Config, db?: Database) {
-  const rpc = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1 }), cacheTime: 0 });
+  const rpc = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config, { timeout: 15_000, retryCount: 1 }), cacheTime: 0 });
   const address = config.MODEL_REGISTRY_ADDRESS as Hex;
   async function assertSupported(): Promise<{ scope: string }> {
     try {
@@ -78,7 +79,7 @@ export function createTcbRegistry(config: Config, db?: Database) {
       if (!db) throw new AppError("TCB_SIGNER_UNAVAILABLE", "TCB listings require the durable signer database", 503);
       await assertSupported();
       const provider = privateKeyToAccount(config.DEPLOYER_PRIVATE_KEY).address;
-      const options = { db, rpcUrl: config.ARC_RPC_URL, chainId: config.ARC_CHAIN_ID, privateKey: config.DEPLOYER_PRIVATE_KEY,
+      const options = { db, fetchFn: apiRpcFetch(config), rpcUrl: config.ARC_RPC_URL, chainId: config.ARC_CHAIN_ID, privateKey: config.DEPLOYER_PRIVATE_KEY,
         ...(config.CHAIN_CONFIRMATIONS === undefined ? {} : { confirmations: config.CHAIN_CONFIRMATIONS }) };
       const prefix = `tcb-list:${address.toLowerCase()}:${operationKey}`;
       const stake = await rpc.readContract({ address, abi: tcbRegistryAbi, functionName: "listingStake" });

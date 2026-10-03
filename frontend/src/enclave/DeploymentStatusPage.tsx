@@ -87,8 +87,9 @@ export function DeploymentStatusContent({ snapshot, error, receiptCount, arcPaym
     <section className="panel" aria-label="Arc receipt count"><h2>Confirmed Arc receipts</h2>
       <p>{receiptCount ? `${receiptCount.confirmed} receipts confirmed on Arc (chain ${receiptCount.chainId})` : "Count unavailable"}</p>
       <p className="field-note">Counted from receipts whose Arc anchor transaction was confirmed by the gateway worker. It does not include pending or local simulation records.</p></section>
-    <section className="panel" aria-label="Update history"><h2>Update history</h2><p>Selected repository changes. This is not a service uptime log.</p>
-      <ol className="deployment-limits">{releaseUpdates.map(update => <li key={update.revision}><time dateTime={update.date}>{update.date}</time> · <strong>{update.title}</strong> — {update.detail} <code>{update.revision}</code></li>)}</ol>
+    <section className="panel" aria-label="Update history"><h2>Update history</h2><p>Selected reviewed repository and deployment updates. This is not a service uptime log.</p>
+      <ol className="deployment-limits">{releaseUpdates.map(update => <li key={`${update.date}:${update.title}`}><time dateTime={update.date}>{update.date}</time> · <strong>{update.title}</strong> — {update.detail} <code>{update.revision}</code>
+        {"links" in update && update.links.map(link => <span key={link.url}> · <a href={link.url} target="_blank" rel="noreferrer">{link.label} ↗</a></span>)}</li>)}</ol>
       <a className="text-link" href="/models">Browse the public model registry ↗</a></section>
   </main></>;
 }

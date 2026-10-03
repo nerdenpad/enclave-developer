@@ -17,6 +17,7 @@ function installedChromium(): string | undefined {
 const executablePath = installedChromium();
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: "**/checkout-candidate.spec.ts",
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,

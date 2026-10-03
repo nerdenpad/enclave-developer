@@ -4,6 +4,7 @@ import { paymentWallet, onWalletChanged } from "./wallet-runtime";
 import { loginWallet, logoutWallet, resumeWallet, walletLoginAvailable } from "./wallet-auth";
 import arc from "./arc-mainnet.json";
 import { arcTransactionUrl, receiptsCsv } from "./receipt-tools";
+import { deploymentCopy } from "./deployment-copy";
 
 const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const short = (value: string) => value.length > 22 ? `${value.slice(0, 12)}…${value.slice(-6)}` : value;
@@ -11,6 +12,7 @@ const units = (value: string) => { const amount = BigInt(value); return `${amoun
 const date = (value: string) => new Date(value).toLocaleString("en-GB", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 function message(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.code === "INFERENCE_EXECUTION_UNCERTAIN") return "Execution may already have started. This payment is quarantined for operator review. Do not retry or submit another payment for this request.";
     if (error.status === 401) return "The API key was rejected or the session expired. Reconnect your workspace.";
     if (error.code === "MANDATE_LIMIT_EXCEEDED" || error.code.includes("LIMIT")) return "This request exceeds a spending limit. No inference was started.";
     if (error.status === 503) return "The gateway or inference provider is temporarily unavailable. The request was not retried. Check payment history before sending another request.";
@@ -44,7 +46,7 @@ export function mountDashboard(): () => void {
   let models: Model[] = [];
   let policies: Policies | null = null;
   let pending: PreparedInference | null = null;
-  let recovery: { client: EnclaveClient; request: PreparedInference } | null = null;
+  let recovery: { client: EnclaveClient; request: PreparedInference; quarantined: boolean } | null = null;
   let receipt: WorkspaceReceipt | null = null;
   let lastResult: VerifiedInference | null = null;
   let busy = false;
@@ -81,8 +83,17 @@ export function mountDashboard(): () => void {
     $<HTMLButtonElement>("#run-inference").disabled = value || !client || Boolean(recovery);
     text("#run-inference span", value ? "Request in progress…" : "Run inference");
     $<HTMLButtonElement>("#disconnect-gateway").disabled = value;
-    $<HTMLButtonElement>("#retry-inference").disabled = value;
-    $<HTMLButtonElement>("#dismiss-recovery").disabled = value;
+    $<HTMLButtonElement>("#retry-inference").disabled = value || Boolean(recovery?.quarantined);
+    $<HTMLButtonElement>("#dismiss-recovery").disabled = value || Boolean(recovery?.quarantined);
+  }
+  function renderRecovery(quarantined: boolean) {
+    $("#retry-inference").hidden = quarantined; $("#dismiss-recovery").hidden = quarantined;
+    text("#recovery-note", quarantined
+      ? "The gateway cannot establish whether execution completed. This payment is quarantined; repeating it could duplicate provider work. Keep the payment ID for operator review."
+      : "The request may already be paid. Retry the same encrypted request and payment instead of creating a new one. Nothing is retried automatically.");
+    text("#recovery-guidance", quarantined
+      ? "Check payment history. Do not create another paid request to replace this one. Quarantine does not establish a refund or cancellation."
+      : "Before dismissing recovery or starting another request, check payment history. Dismissal does not cancel, refund or reverse an earlier payment or inference.");
   }
   function step(index: number, state: string, label: string) {
     const li = $(`[data-step="${index}"]`); li.className = state; li.querySelector("i")!.textContent = label;
@@ -92,7 +103,7 @@ export function mountDashboard(): () => void {
     if (state === "connecting" || state === "attesting") { step(0, "active", "Checking"); text("#output-status", "Opening a gateway session"); }
     if (state === "encrypting") { step(0, "done", "Admitted"); text("#output-status", "Encrypting request"); }
     if (state === "payment-required") { step(1, "active", "Required"); text("#output-status", "Awaiting payment confirmation"); }
-    if (state === "settling") { step(1, "active", "Settling"); text("#output-status", "Settling test USDC"); }
+    if (state === "settling") { step(1, "active", "Settling"); text("#output-status", deploymentCopy(health, configuredArcPaymentPolicy() !== null).settling); }
     if (state === "inferencing") { step(1, "done", "Settled"); step(2, "active", "Running"); text("#output-status", "Waiting for the model response"); }
     if (state === "verifying") { step(2, "done", "Received"); step(3, "active", "Verifying"); text("#output-status", "Decrypting and verifying"); }
     if (state === "complete") { step(3, "done", "Verified"); text("#output-status", "Response verified"); }
@@ -101,26 +112,27 @@ export function mountDashboard(): () => void {
     if (!health) return;
     const near = health.inferenceBackend === "near-verified";
     const echo = health.inferenceBackend === "echo";
-    const local = canSettleLocally(health);
-    const label = near ? "NEAR GPU · DEVELOPMENT GATEWAY" : echo ? "LOCAL ECHO · DEVELOPMENT" : "MODEL ENDPOINT · DEVELOPMENT GATEWAY";
+    const copy = deploymentCopy(health, configuredArcPaymentPolicy() !== null);
+    const providerLabel = near ? "NEAR GPU" : echo ? "LOCAL ECHO" : "MODEL ENDPOINT";
+    const label = `${providerLabel} · ${copy.badgeStage}`;
     text("#environment-badge", label);
-    text("#environment-description", near ? "NEAR adapter configured; each request requires remote hardware verification. Requests are processed by the application gateway." : echo ? "Real gateway, database and receipt signatures. The echo provider is a development fixture." : "Model inference through an OpenAI-compatible endpoint. This adapter does not verify provider hardware.");
+    text("#environment-description", `${copy.stage}. ${near ? "Each provider request requires remote hardware verification by the application gateway. Gateway sessions use software admission." : echo ? "The echo provider is a development fixture." : "This model endpoint adapter does not verify provider hardware."}`);
     text("#connection-status", `Connected · ${client!.baseUrl}`);
     $("#connection-status").dataset["connected"] = "true";
     text("#connection-note", `Chain ${health.chainId} · ${health.paymentMode} payments · gateway ${health.teeMode}`);
     text("#request-environment", near ? "NEAR GPU" : health.inferenceBackend.toUpperCase());
     select("#model-select").innerHTML = `<option value="${escape(health.servingModel.modelHash)}">${escape(health.servingModel.name)}</option>`;
-    text("#request-note", `Serving ${health.servingModel.name}. Price: ${health.inferencePriceUsdc.toFixed(6)} ${local ? "test " : ""}USDC per call. ${near ? "Remote CPU/GPU evidence is checked by the gateway." : echo ? "Echo is a test provider, not an LLM." : "The configured model endpoint serves the request without hardware verification by this adapter."}`);
+    text("#request-note", `Serving ${health.servingModel.name}. Configured price: ${health.inferencePriceUsdc.toFixed(6)} ${health.paymentMode === "mock" ? "test " : ""}USDC per call. ${near ? "Remote CPU/GPU evidence is checked by the gateway." : echo ? "Echo is a test provider, not an LLM." : "The configured model endpoint serves the request without hardware verification by this adapter."} ${copy.checkout}.`);
     text("#session-trust-note", health.teeMode === "dev" ? "Development application policy" : "Application policy");
-    text("#provider-trust-note", near ? "NEAR evidence verified by the gateway" : echo ? "Local echo development fixture" : "OpenAI-compatible model endpoint · hardware not verified");
-    text("#payment-network", local ? "Local EVM · 31337" : `EVM chain ${health.chainId}`);
-    text("#payment-description", local ? `Local-chain payment uses test USDC.${echo ? " The echo provider is a local fixture." : " Remote provider usage can still be billed."}` : "A wallet authorization is required. This interface does not submit real-network payments.");
+    text("#provider-trust-note", near ? "NEAR evidence checked by the gateway" : echo ? "Local echo development fixture" : "OpenAI-compatible model endpoint · hardware not verified");
+    text("#payment-network", copy.network);
+    text("#payment-description", copy.paymentDescription);
     text("#registry-status", "BACKEND REGISTRY");
-    text("#metric-environment", near ? "NEAR GPU / dev gateway" : echo ? "Local echo development" : "Model endpoint / dev gateway");
+    text("#metric-environment", `${providerLabel} / ${copy.stage}`);
     text("#topology-status", near ? "NEAR GPU + APP GATEWAY" : echo ? "LOCAL DEVELOPMENT" : "MODEL ENDPOINT + APP GATEWAY");
     text("#topology-provider", near ? "NEAR GPU provider" : echo ? "Local echo provider" : "OpenAI-compatible model provider");
     text("#topology-boundary", "Application gateway · request decryption boundary");
-    text("#topology-chain", `CHAIN ${health.chainId} · ${local ? "TEST USDC" : "USDC"} · x402`);
+    text("#topology-chain", `CHAIN ${health.chainId} · ${health.paymentMode === "mock" ? "TEST USDC" : "USDC"} · x402`);
     text("#agent-model-note", `Allowed model: ${health.servingModel.name}. The gateway enforces the daily limit before execution.`);
     if (policies) {
       text("#topology-policy", `POLICY / V${policies.active.version}`);
@@ -196,6 +208,7 @@ export function mountDashboard(): () => void {
   async function finish(result: VerifiedInference) {
     if (lastResult !== result) lastResult?.outputBytes.fill(0);
     lastResult = result; pending = null; recovery = null; $("#inference-recovery").hidden = true;
+    renderRecovery(false);
     text("#inference-output", result.outputText ?? `The provider returned ${result.outputBytes.length} binary bytes. The encrypted output and receipt hashes verified successfully.`);
     text("#output-status", "Response verified");
     $("#open-last-receipt").hidden = false;
@@ -227,6 +240,7 @@ export function mountDashboard(): () => void {
     select("#model-select").innerHTML = '<option>Connect a gateway</option>'; select("#inference-agent").innerHTML = "";
     $("#open-last-receipt").hidden = true;
     $("#inference-recovery").hidden = true; text("#recovery-payment", "");
+    renderRecovery(false);
     $$<HTMLButtonElement>("[id^=load-more-]").forEach((item) => { item.hidden = true; item.disabled = false; });
     $$<HTMLButtonElement>("[data-requires-connection]").forEach((item) => { item.disabled = true; });
     $$<HTMLDialogElement>("dialog").forEach((item) => item.close());
@@ -235,10 +249,11 @@ export function mountDashboard(): () => void {
     setBusy(false);
   }
   function executePrepared(active: EnclaveClient, request: PreparedInference) {
+    if (recovery?.quarantined) return;
     if (busy && recovery) return;
     const version = connectionVersion;
     const current = () => !life.signal.aborted && client === active && version === connectionVersion;
-    recovery = { client: active, request }; setBusy(true); text("#inference-error", "");
+    recovery = { client: active, request, quarantined: false }; renderRecovery(false); setBusy(true); text("#inference-error", "");
     void (async () => {
       const runOptions = { ...options, onStep: (state: InferenceStep) => { if (current()) onStep(state); } };
       if (canSettleLocally(request.health)) return active.settleLocalAndRun(request, runOptions);
@@ -250,7 +265,10 @@ export function mountDashboard(): () => void {
       await finish(result);
     }).catch((error: unknown) => {
       if (!current()) return;
-      text("#inference-error", message(error)); text("#output-status", "Request interrupted · continuation available");
+      const quarantined = error instanceof ApiError && error.code === "INFERENCE_EXECUTION_UNCERTAIN";
+      if (recovery) recovery.quarantined = quarantined;
+      renderRecovery(quarantined);
+      text("#inference-error", message(error)); text("#output-status", quarantined ? "Execution uncertain · operator review required" : "Request interrupted · continuation available");
       text("#recovery-payment", `Payment ${request.challenge?.accepts[0]?.extra.paymentId ?? "unknown"}`);
       $("#inference-recovery").hidden = false; void refresh(true);
     }).finally(() => { if (current()) setBusy(false); });
@@ -279,15 +297,30 @@ export function mountDashboard(): () => void {
     if (restoreAttempted || walletToken || signingIn || life.signal.aborted) return;
     let wallet; try { wallet = paymentWallet(); } catch { return; }
     restoreAttempted = true;
+    signingIn = true; $<HTMLButtonElement>("#wallet-login").disabled = true;
+    text("#connection-status", "Restoring wallet workspace…");
+    text("#wallet-login-status", "Restoring your wallet login and loading gateway policy…");
     const generation = loginGeneration, version = ++connectionVersion;
     try {
       const session = await resumeWallet(wallet);
-      if (!session || life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
+      if (life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
+      if (!session) {
+        text("#connection-status", "Disconnected"); text("#wallet-login-status", "Connect your wallet on Arc Mainnet, then sign in.");
+        return;
+      }
       walletToken = session.token;
       await connectWorkspace(session.token, "/api", version);
       if (life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
       applyWalletSession(session.expiresAt);
-    } catch { if (!life.signal.aborted && generation === loginGeneration && walletToken) clearWorkspace(); }
+    } catch {
+      if (!life.signal.aborted && generation === loginGeneration && version === connectionVersion) {
+        if (walletToken) clearWorkspace();
+        text("#connection-status", "Disconnected"); text("#wallet-login-status", "Wallet login could not resume. Sign in to load your workspace.");
+      }
+    } finally {
+      signingIn = false;
+      if (!life.signal.aborted) $<HTMLButtonElement>("#wallet-login").disabled = false;
+    }
   }
   function applyWalletSession(expiresAt: string) {
     loginExpiry = setTimeout(() => { clearWorkspace(); notify("Your wallet login expired. Sign in again."); }, Math.max(0, Date.parse(expiresAt) - Date.now()));
@@ -295,9 +328,10 @@ export function mountDashboard(): () => void {
     text("#wallet-login-status", "Signed in. Payments are confirmed separately in your wallet.");
     if (health?.paymentMode !== "authorized" || health.chainId !== 5042) {
       $<HTMLButtonElement>("#run-inference").disabled = true;
-      text("#request-note", "Wallet login is available. Public inference and real payments are not enabled on this pilot yet.");
+      text("#request-note", "Wallet sign-in is available. This gateway does not report authorized Arc settlement; public checkout is blocked.");
     }
-    $$<HTMLButtonElement>("[data-requires-connection]").filter(button => button.id !== "run-inference").forEach(button => { button.disabled = true; });
+    const walletReadActions = new Set(["export-receipts", "export-receipts-csv", "export-usage"]);
+    $$<HTMLButtonElement>("[data-requires-connection]").filter(button => button.id !== "run-inference" && !walletReadActions.has(button.id)).forEach(button => { button.disabled = true; });
   }
   const stopWalletListener = onWalletChanged(() => {
     loginGeneration++;
@@ -326,6 +360,7 @@ export function mountDashboard(): () => void {
   });
   async function connectWorkspace(apiKey: string, baseUrl: string, version: number) {
     const next = new EnclaveClient({ apiKey, baseUrl });
+    if (!client && version === connectionVersion && !life.signal.aborted) text("#connection-status", "Loading workspace and gateway policy…");
     try {
       const [h, w, m, p] = await Promise.all([next.health(options), next.workspace({}, options), next.models(options), next.policies(options)]);
       if (version !== connectionVersion || life.signal.aborted) { next.disconnect(); return; }
@@ -373,16 +408,17 @@ export function mountDashboard(): () => void {
     pending = null; dialog("#payment-dialog").close(); executePrepared(active, request);
   });
   on("#retry-inference", "click", () => {
-    if (!recovery || busy || client !== recovery.client) return;
+    if (!recovery || recovery.quarantined || busy || client !== recovery.client) return;
     executePrepared(recovery.client, recovery.request);
   });
   on("#dismiss-recovery", "click", () => {
-    if (!recovery || busy) return;
+    if (!recovery || recovery.quarantined || busy) return;
     recovery = null; $("#inference-recovery").hidden = true; text("#recovery-payment", ""); setBusy(false);
     text("#output-status", "Recovery dismissed · check payment history");
     text("#inference-error", "Check payment history before starting another request. Dismissal did not cancel or refund the previous operation.");
     void refresh(true);
   });
+  on("#recovery-history", "click", event => { event.preventDefault(); navigate("payments"); });
   on("#cancel-payment", "click", () => dialog("#payment-dialog").close());
   on("#payment-dialog", "close", () => {
     if (pending) { pending = null; setBusy(false); step(1, "", "Cancelled"); text("#output-status", "Payment not submitted"); text("#inference-output", "Payment was not submitted. No inference was started. The open payment record remains visible in your history."); void refresh(true); }

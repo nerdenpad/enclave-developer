@@ -1,8 +1,9 @@
+import { apiRpcFetch, apiRpcTransport } from "./rpc-transport.js";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { sendDurableTransaction, confirmDurableTransaction, type ContractCall, type Database } from "@enclave/db";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, createWalletClient, decodeFunctionData, http, keccak256, maxUint256, parseAbi, parseAbiItem, publicActions, stringToHex, zeroHash, type Hex } from "viem";
+import { createPublicClient, createWalletClient, decodeFunctionData,  keccak256, maxUint256, parseAbi, parseAbiItem, publicActions, stringToHex, zeroHash, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { isConfiguredAddress } from "@enclave/core";
@@ -33,10 +34,10 @@ function walletFor(config: Config, db?: Database, operation: string = randomUUID
     account,
     chain: { ...foundry, id: config.ARC_CHAIN_ID },
     pollingInterval: config.NODE_ENV === "test" ? 25 : 4_000,
-    transport: http(config.ARC_RPC_URL),
+    transport: apiRpcTransport(config),
   }).extend(publicActions);
   if (db) {
-    const opts = { db, rpcUrl: config.ARC_RPC_URL, chainId: config.ARC_CHAIN_ID, privateKey: config.DEPLOYER_PRIVATE_KEY,
+    const opts = { db, fetchFn: apiRpcFetch(config), rpcUrl: config.ARC_RPC_URL, chainId: config.ARC_CHAIN_ID, privateKey: config.DEPLOYER_PRIVATE_KEY,
       ...(config.CHAIN_CONFIRMATIONS !== undefined ? { confirmations: config.CHAIN_CONFIRMATIONS } : {}),
     };
     let step = 0;
@@ -167,7 +168,7 @@ export function createStaking(config: Config, db?: Database) {
       return tx;
     },
     async stakedOf(who = account.address): Promise<bigint> {
-      const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL) });
+      const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config) });
       return client.readContract({
         address: config.INSURANCE_STAKING_ADDRESS as Hex,
         abi: staking.abi,
@@ -182,7 +183,7 @@ export function createMarketplace(config: Config, db?: Database) {
   const { wallet } = walletFor(config, db);
   const registry = artifact("ModelRegistry");
   const token = artifact("ENCL");
-  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL) });
+  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config) });
   return serialized(config, {
     async list(modelHash: Hex, codeHash: Hex, bps: number): Promise<{ tx: Hex; id: bigint }> {
       const stake = (await wallet.readContract({
@@ -287,7 +288,7 @@ export function createFeeOps(config: Config, db?: Database) {
   const { wallet } = walletFor(config, db);
   const fees = artifact("FeeVault");
   const usdc = artifact("MockUSDC");
-  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL) });
+  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config) });
   return serialized(config, {
     async distribute(): Promise<Hex> {
       const tx = await wallet.writeContract({
@@ -354,7 +355,7 @@ const x402TokenAbi = parseAbi([
 ]);
 const authorizationUsedEvent = parseAbiItem("event AuthorizationUsed(address indexed authorizer,bytes32 indexed nonce)");
 function x402Client(config: Config) {
-  return createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1 }), cacheTime: 0 });
+  return createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config, { timeout: 15_000, retryCount: 1 }), cacheTime: 0 });
 }
 
 /** Recovery supports direct token calls, including the SDK's bytes and v/r/s overloads.
@@ -453,7 +454,7 @@ export function createX402Facilitator(config: Config, db: Database) {
 export function createRegistryApproval(config: Config, db?: Database) {
   const { wallet } = walletFor(config, db);
   const registry = artifact("ModelRegistry");
-  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL) });
+  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config) });
   return serialized(config, {
     async status(id: bigint) {
       const [row, timelock, block] = await Promise.all([
@@ -478,7 +479,7 @@ export function createEconomicOps(config: Config, db?: Database) {
   const fees = artifact("FeeVault");
   const staking = artifact("InsuranceStaking");
   const token = artifact("MockUSDC");
-  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: http(config.ARC_RPC_URL) });
+  const client = createPublicClient({ chain: { ...foundry, id: config.ARC_CHAIN_ID }, transport: apiRpcTransport(config) });
   const readFee = (functionName: string) => client.readContract({ address: config.FEE_VAULT_ADDRESS as Hex, abi: fees.abi, functionName });
   function feeLogs(receipt: Awaited<ReturnType<typeof confirmed>>, eventName: string) {
     return parseEventLogs({ abi: fees.abi as Abi, eventName, logs: receipt.logs.filter((log) => log.address.toLowerCase() === config.FEE_VAULT_ADDRESS.toLowerCase()) });

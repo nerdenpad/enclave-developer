@@ -39,6 +39,9 @@ describe("bounded reorg checkpoints", () => {
 
 describe("chain and deployment cursor identities", () => {
   const identity = { chainId: 31337, genesisHash: hash(1), registry: "0x5FbDB2315678afecb367f032d93F642f64180aa3" };
+  it("preserves the identity encoding of persisted version-two indexed rows", () => {
+    expect(indexerScope(identity)).toBe("enclave-v2:31337:0xc4dd19cbb8f29f0e8fc2b875ffb42aec3d626bdadfa5c8bb01b60d4cccd2d7b9");
+  });
   it("normalizes address case and unconfigured placeholders", () => {
     expect(indexerScope(identity)).toBe(indexerScope({ ...identity, registry: identity.registry.toLowerCase(), verifier: "0x0000000000000000000000000000000000000004" }));
   });

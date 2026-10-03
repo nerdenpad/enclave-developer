@@ -34,7 +34,10 @@
     "test:contracts": "tsx scripts/contracts-test.ts",
     "test:all": "npm run typecheck && npm test && npm run test:integration && npm run test:contracts",
     "test:coverage": "npm test -w @enclave/core -- --coverage && npm test -w @enclave/worker -- --coverage && npm test -w @enclave/agent-sdk -- --coverage && tsx scripts/test-integration.ts --coverage",
-    "pretest": "npm run contracts:compile"
+    "pretest": "npm run contracts:compile",
+    "acceptance:near-arc": "tsx scripts/accept-near-arc.ts",
+    "acceptance:recover:near-arc": "tsx scripts/rearm-near-arc-settlement.ts",
+    "test:acceptance:near-arc": "vitest run scripts/accept-near-arc scripts/rearm-near-arc-settlement && node --test scripts/acceptance-economics-snapshot.test.mjs scripts/collect-acceptance-no-spend.test.mjs"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "4.1.11",

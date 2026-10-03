@@ -26,6 +26,10 @@ no GPUs on this host. A single host is not highly available.
    web release. For a staged build, pass its absolute `public/assets` directory.
    nginx serves compressed public assets directly; retain previous hashed files
    for open tabs and rollback. Never copy environment files into this directory.
+   After publishing, run `MOTION_BASE_URL=https://enclaveagent.tech npm run test:motion`
+   from the repository root on the developer machine. This checks module HTTP
+   status and MIME type, client initialization, video and scroll/FAQ animations,
+   including mobile and reduced motion. It intercepts API requests locally.
 6. From `_backend`, bootstrap this fresh, private development environment using
    `node --import tsx scripts/prepare-demo.ts --near-env .env.near`. Docker
    access is required. This command refuses to overwrite unmanaged state.

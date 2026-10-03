@@ -1,8 +1,8 @@
 # Arc Mainnet deployment
 
-Arc Mainnet is the selected USDC settlement network. Contracts were deployed on 26 September 2026 against the reviewed USDC token. The hosted API and worker now use chain `5042` with `PAYMENT_MODE=authorized` and a dedicated relay. Public browser checkout remains disabled (`VITE_ARC_PAYMENTS_ENABLED=false`) until a hosted inference path is accepted.
+Arc Mainnet is the selected USDC settlement network. Contracts were deployed on 26 September 2026 against the reviewed USDC token. The hosted API and worker use chain `5042` with `PAYMENT_MODE=authorized` and a dedicated relay. Public browser checkout is enabled at the approved **0.10 USDC per request**. Serving policy version 2 is registered, approved and active.
 
-See [payment launch preparation](payment-launch.md) for wallet roles and the deployment record. Pricing approval is currently deferred.
+See [payment operations](payment-launch.md) for wallet roles and [release progress](release-progress.md) for confirmed settlement and receipt transactions. Manual wallet acceptance was confirmed by the project owner on 3 October 2026.
 
 ## Reviewed public parameters
 
@@ -26,13 +26,15 @@ npm run check:arc
 
 This read-only check verifies chain ID, token name/version/decimals, the on-chain domain separator against a locally computed EIP-712 hash, EIP-3009 authorization-state access and block consistency. It loads no private key and submits no transaction. It passed on 24 September 2026 at block `22559511`. This is evidence for configuration, not payment acceptance or full write-method compatibility.
 
-## Before enabling settlement
+## Deployment and acceptance checklist
+
+The deployed payment path passed three real paid requests, including a WalletConnect browser journey and a complete final model answer. The checklist below also applies to a replacement deployment. Live settlement interruption, signer rotation and model revocation remain in the [E1 acceptance matrix](e1-release.md).
 
 1. Supply independently controlled deployment, governance and relay wallets, funded with Arc USDC for gas. Never reuse public Anvil private keys. Create a separate deployment record and payment state; do not reinterpret existing mock-chain records as mainnet payments.
 2. Review RPC availability, gas estimation and finality handling against [Arc EVM differences](https://docs.arc.io/arc/references/evm-differences). Standard Anvil tests alone do not cover Arc-specific execution behavior.
 3. Deploy and verify Enclave contracts, bind approved policies and signer, and record their addresses. Configure `ARC_CHAIN_ID=5042`, the reviewed RPC and token address, `USDC_EIP712_NAME=USDC` and `USDC_EIP712_VERSION=2`. The development default `USD Coin` is not the Arc signing name. This list is not a complete production environment.
-4. Configure the scoped SIWE login and complete real-payment recovery acceptance. Browser receive authorization is implemented behind disabled release configuration; see [wallet payments](wallet-payments.md). Keep the production release gate enabled until acceptance is complete. Wallet login and EIP-3009 payments support EOAs; smart-contract wallets need separate support.
+4. Configure scoped SIWE login and reviewed browser receive authorization; see [wallet payments](wallet-payments.md). Public checkout is enabled on the accepted deployment. Retain the production release checks when replacing it. Wallet login and EIP-3009 payments support EOAs; smart-contract wallets need separate support.
 5. Validate exact token-emitter filtering and six-decimal amounts. Arc also emits native system transfer events; they must not be counted as a second payment. See [USDC system events](https://docs.arc.io/arc/references/usdc-system-events).
 6. Test rejection, insufficient funds, nonce reuse, duplicate submissions, uncertain settlement and restart recovery. Complete an authorized small real-USDC payment before enabling the public payment action.
 
-The hosted pilot now has a WalletConnect Project ID configured: the live check loaded 77 Arc-filtered catalog entries and confirmed a relay response and QR generation. Real-wallet approval and payment signatures still require acceptance; catalog membership alone does not demonstrate 50 compatible payment wallets. Keep the `enclaveagent.tech` domain allowlist configured. See [wallet acceptance](wallet-payments.md).
+WalletConnect is configured for `enclaveagent.tech`. The recorded browser check loaded 77 Arc-filtered catalog entries; the subsequent real protocol journey completed sign-in, payment, inference and receipt verification. Manual wallet acceptance was confirmed by the project owner on 3 October 2026. Catalog membership does not establish payment compatibility for every listed wallet. Keep the domain allowlist configured and retain wallet-specific acceptance records. See [wallet acceptance](wallet-payments.md).

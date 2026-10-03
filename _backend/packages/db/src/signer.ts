@@ -6,7 +6,7 @@ import type { Database } from "./client.js";
 import { chainTransactions } from "./schema.js";
 import { enforceArcRelayGas } from "./arc-gas-policy.js";
 
-export type SignerOptions = { db: Database; rpcUrl: string; chainId: number; privateKey: Hex; confirmations?: number };
+export type SignerOptions = { db: Database; rpcUrl: string; chainId: number; privateKey: Hex; confirmations?: number; fetchFn?: typeof fetch };
 export type ContractCall = { address: Hex; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint };
 export class TransactionRevertedError extends Error {
   constructor(readonly txHash: Hex) { super(`Transaction reverted: ${txHash}`); this.name = "TransactionRevertedError"; }
@@ -31,7 +31,8 @@ function confirmationDepth(opts: SignerOptions): number {
 function client(opts: SignerOptions) {
   confirmationDepth(opts);
   return createWalletClient({ account: privateKeyToAccount(opts.privateKey), chain: { ...foundry, id: opts.chainId }, cacheTime: 0,
-    pollingInterval: 100, transport: http(opts.rpcUrl, { timeout: 20_000, retryCount: 1 }) }).extend(publicActions);
+    pollingInterval: 100, transport: http(opts.rpcUrl, { timeout: 20_000, retryCount: 1,
+      ...(opts.fetchFn ? { fetchFn: opts.fetchFn, batch: false } : {}) }) }).extend(publicActions);
 }
 type Wallet = ReturnType<typeof client>;
 async function scopeFor(wallet: Wallet, chainId: number) {

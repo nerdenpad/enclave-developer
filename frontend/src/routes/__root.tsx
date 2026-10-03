@@ -81,7 +81,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "stylesheet", href: "/enclave.css" },
+      { rel: "stylesheet", href: "/enclave.css?v=20261001" },
       { rel: "icon", href: "/assets/enclave-sphere.png" },
     ],
   }),

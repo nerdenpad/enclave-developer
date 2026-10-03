@@ -1,16 +1,20 @@
 """Enforcement for NEAR's ECDSA + SPKI report format; no inference or credentials.
 
 Intel quote signatures/collateral use dcap-qvl's compiled Rust verifier and pinned
-Intel root. NVIDIA results are ES384 verified against the fixed HTTPS NRAS JWKS.
+Intel root. NVIDIA uses signed NRAS results by default, or an explicitly reviewed
+and pinned local NVAT implementation that re-verifies raw evidence/collateral.
 Hardware validity and authorization of the measured workload are separate steps.
 """
 import asyncio
 import hashlib
 import json
+import os
 import re
 import struct
+import tempfile
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import dcap_qvl
 import jwt
@@ -18,6 +22,23 @@ import requests
 
 MAX_DOCUMENT_BYTES = 2_000_000
 NRAS_ORIGIN = "https://nras.attestation.nvidia.com"
+NVAT_VERSION = "1.2.2"
+NVAT_BINARY_SHA256 = "ef4d6b63fc898081d45f39d836848b32e9579202c7b64664aa38350649c09ff6"
+NVAT_LIBRARY_SHA256 = "088b827f0ce9f356afd4afcb27c22bfd71409268e7fc6d987b3331ca8d2a5c24"
+NVAT_TIMEOUT_SECONDS = 180
+NVAT_TRUE_CLAIMS = (
+    "x-nvidia-gpu-arch-check", "x-nvidia-gpu-attestation-report-cert-chain-fwid-match",
+    "x-nvidia-gpu-attestation-report-parsed", "x-nvidia-gpu-attestation-report-nonce-match",
+    "x-nvidia-gpu-attestation-report-signature-verified", "x-nvidia-gpu-driver-rim-fetched",
+    "x-nvidia-gpu-driver-rim-signature-verified", "x-nvidia-gpu-driver-rim-version-match",
+    "x-nvidia-gpu-driver-rim-measurements-available", "x-nvidia-gpu-vbios-rim-fetched",
+    "x-nvidia-gpu-vbios-rim-version-match", "x-nvidia-gpu-vbios-rim-signature-verified",
+    "x-nvidia-gpu-vbios-rim-measurements-available", "x-nvidia-gpu-vbios-index-no-conflict",
+)
+NVAT_CERT_CLAIMS = (
+    "x-nvidia-gpu-attestation-report-cert-chain", "x-nvidia-gpu-driver-rim-cert-chain",
+    "x-nvidia-gpu-vbios-rim-cert-chain",
+)
 MEASUREMENTS = {
     "tee_tcb_svn": 16, "mr_seam": 48, "mr_signer_seam": 48,
     "seam_attributes": 8, "td_attributes": 8, "xfam": 8,
@@ -99,6 +120,15 @@ def timestamp(value):
 def validate_policy(policy, now):
     require(isinstance(policy, dict) and policy.get("schemaVersion") == 1, "POLICY_INVALID")
     require(isinstance(policy.get("version"), str) and 1 <= len(policy["version"]) <= 128, "POLICY_INVALID")
+    nvidia = policy.get("nvidiaVerifier")
+    if nvidia is not None:
+        require(isinstance(nvidia, dict), "POLICY_INVALID")
+        if nvidia.get("mode") == "nras":
+            require(set(nvidia) == {"mode"}, "POLICY_INVALID")
+        else:
+            require(nvidia == {"mode": "local", "sdkVersion": NVAT_VERSION,
+                              "binarySha256": NVAT_BINARY_SHA256,
+                              "librarySha256": NVAT_LIBRARY_SHA256}, "POLICY_INVALID")
     start, end = timestamp(policy.get("validFrom")), timestamp(policy.get("validUntil"))
     require(start <= now < end, "POLICY_EXPIRED")
     session = policy.get("maxSessionSeconds")
@@ -120,6 +150,189 @@ def validate_policy(policy, now):
         require(isinstance(profile.get("gpuModels"), list) and profile["gpuModels"]
                 and all(isinstance(model, str) and model for model in profile["gpuModels"]), "POLICY_INVALID")
     return end, session
+
+
+def nvidia_local_config(policy):
+    """Only protected process configuration can select a reviewed implementation."""
+    mode = os.environ.get("NVIDIA_VERIFIER_MODE", "nras")
+    reviewed = policy.get("nvidiaVerifier", {"mode": "nras"})
+    require(isinstance(reviewed, dict), "POLICY_INVALID")
+    require(mode in ("nras", "local") and reviewed.get("mode") == mode,
+            "NVIDIA_VERIFIER_MISMATCH")
+    if mode == "nras":
+        return None
+    paths = []
+    for name in ("NVIDIA_NVAT_BINARY", "NVIDIA_NVAT_LIBRARY"):
+        value = os.environ.get(name)
+        require(isinstance(value, str) and 1 <= len(value) <= 4096
+                and "\x00" not in value and Path(value).is_absolute(),
+                "NVIDIA_LOCAL_CONFIG_INVALID")
+        paths.append(Path(value))
+    # The loader parses ':' as a list separator and expands '$ORIGIN' tokens.
+    # It must receive one canonical directory, never a loader expression.
+    require(not any(token in str(paths[1].parent) for token in (":", "$")),
+            "NVIDIA_LOCAL_CONFIG_INVALID")
+    try:
+        paths = [path.resolve(strict=True) for path in paths]
+    except (OSError, RuntimeError) as error:
+        raise VerificationError("NVIDIA_LOCAL_CONFIG_INVALID") from error
+    require(not any(token in str(paths[1].parent) for token in (":", "$")),
+            "NVIDIA_LOCAL_CONFIG_INVALID")
+    return {**reviewed, "binary": paths[0], "library": paths[1]}
+
+
+def verify_nvat_files(config):
+    """Check both the reviewed library and the soname actually used by the loader."""
+    try:
+        binary, library = config["binary"], config["library"]
+        candidates = ((binary, config["binarySha256"], 2_000_000),
+                      (library, config["librarySha256"], 32_000_000),
+                      (library.parent / "libnvat.so.1", config["librarySha256"], 32_000_000))
+        for path, expected, limit in candidates:
+            require(path.is_file() and path.stat().st_size <= limit,
+                    "NVIDIA_IMPLEMENTATION_CHANGED")
+            with path.open("rb") as source:
+                value = source.read(limit + 1)
+            require(len(value) <= limit and digest(value) == expected,
+                    "NVIDIA_IMPLEMENTATION_CHANGED")
+    except VerificationError:
+        raise
+    except (OSError, ValueError) as error:
+        raise VerificationError("NVIDIA_IMPLEMENTATION_CHANGED") from error
+
+
+def nvat_artifact(payload, config):
+    # Local EATs/claims are not NVIDIA-issued signed evidence. Commit the raw
+    # SPDM/certificate inputs and implementation, and verify them anew on replay.
+    return {"format": "nvat-local-v1", "sdkVersion": config["sdkVersion"],
+            "binarySha256": config["binarySha256"],
+            "librarySha256": config["librarySha256"], "payload": payload}
+
+
+def verify_nvat_claims(output, nonce, gpu_count, now):
+    require(isinstance(output, dict) and type(output.get("result_code")) is int
+            and output["result_code"] == 0, "NVIDIA_RESULT_REJECTED")
+    claims = output.get("claims")
+    require(isinstance(claims, list) and len(claims) == gpu_count,
+            "NVIDIA_GPU_SET_INVALID")
+    devices, ueids = [], set()
+    for claim in claims:
+        require(isinstance(claim, dict) and claim.get("x-nvidia-device-type") == "gpu"
+                and claim.get("x-nvidia-gpu-claims-version") == "3.0"
+                and claim.get("measres") == "success" and claim.get("secboot") is True
+                and claim.get("dbgstat") == "disabled"
+                and all(claim.get(key) is True for key in NVAT_TRUE_CLAIMS)
+                and claim.get("x-nvidia-mismatch-measurement-records") is None
+                and "x-nvidia-mismatch-measurement-records" in claim
+                and claim.get("x-nvidia-attestation-warning") is None,
+                "NVIDIA_GPU_REJECTED")
+        require(hex_bytes(claim.get("eat_nonce"), 32, "NVIDIA_NONCE_INVALID") == nonce,
+                "NVIDIA_NONCE_INVALID")
+        for key in NVAT_CERT_CLAIMS:
+            cert = claim.get(key)
+            require(isinstance(cert, dict) and cert.get("x-nvidia-cert-status") == "valid"
+                    and cert.get("x-nvidia-cert-ocsp-status") == "good"
+                    and cert.get("x-nvidia-cert-ocsp-nonce-matches") is True
+                    and cert.get("x-nvidia-cert-ocsp-response-valid") is True
+                    and "x-nvidia-cert-revocation-reason" in cert
+                    and cert["x-nvidia-cert-revocation-reason"] is None,
+                    "NVIDIA_GPU_REJECTED")
+            try:
+                expiry = timestamp(cert.get("x-nvidia-cert-expiration-date"))
+                require(expiry >= now + 300, "NVIDIA_TIME_INVALID")
+            except VerificationError as error:
+                raise VerificationError("NVIDIA_TIME_INVALID") from error
+        ueid, model = claim.get("ueid"), claim.get("hwmodel")
+        require(isinstance(ueid, str) and 1 <= len(ueid) <= 1024 and ueid not in ueids,
+                "NVIDIA_GPU_SET_INVALID")
+        require(isinstance(model, str) and 1 <= len(model) <= 256, "NVIDIA_GPU_REJECTED")
+        ueids.add(ueid)
+        devices.append(model)
+    return devices
+
+
+async def verify_nvidia_local(payload, nonce, config):
+    entries = payload["evidence_list"]
+    for item in entries:
+        require(set(item) == {"arch", "nonce", "certificate", "evidence"}
+                and item["arch"] == payload["arch"], "NVIDIA_INVALID")
+        require(hex_bytes(item["nonce"], 32, "NVIDIA_NONCE_INVALID") == nonce,
+                "NVIDIA_NONCE_INVALID")
+    verify_nvat_files(config)
+    process, tasks, aggregate = None, [], None
+    try:
+        with tempfile.TemporaryDirectory(prefix="enclave-nvat-") as folder:
+            evidence_file = Path(folder) / "evidence.json"
+            evidence_file.write_bytes(canonical(entries))
+            # Ignore proxy, service URL, credential, preload and test overrides.
+            # NVAT's default HTTP options verify the peer and CA chain. No custom
+            # relying-party Rego is supplied: it could override overall failure.
+            environment = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8",
+                           "LD_LIBRARY_PATH": str(config["library"].parent)}
+            process = await asyncio.create_subprocess_exec(
+                str(config["binary"]), "attest", "--device", "gpu", "--verifier", "local",
+                "--gpu-evidence-source", "file", "--gpu-evidence-file", str(evidence_file),
+                "--nonce", nonce.hex(), "--rim-store", "remote",
+                "--rim-url", "https://rim.attestation.nvidia.com",
+                "--ocsp-url", "https://ocsp.ndis.nvidia.com",
+                "--verify-rim-signatures", "--verify-rim-cert-chain",
+                "--format", "json", "--log-level", "off",
+                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, env=environment)
+            consumed = [0]
+
+            async def bounded_read(stream, retain):
+                result = bytearray()
+                while True:
+                    chunk = await stream.read(16384)
+                    if not chunk:
+                        return bytes(result)
+                    consumed[0] += len(chunk)
+                    require(consumed[0] <= MAX_DOCUMENT_BYTES, "NVIDIA_LOCAL_OUTPUT_INVALID")
+                    if retain:
+                        result.extend(chunk)
+
+            tasks = [asyncio.create_task(bounded_read(process.stdout, True)),
+                     asyncio.create_task(bounded_read(process.stderr, False)),
+                     asyncio.create_task(process.wait())]
+            aggregate = asyncio.gather(*tasks)
+            stdout, _, exit_code = await asyncio.wait_for(aggregate, NVAT_TIMEOUT_SECONDS)
+            verify_nvat_files(config)
+            require(exit_code == 0, "NVIDIA_RESULT_REJECTED")
+            try:
+                output = parse_json(stdout)
+            except VerificationError as error:
+                raise VerificationError("NVIDIA_LOCAL_OUTPUT_INVALID") from error
+            return verify_nvat_claims(output, nonce, len(entries), int(time.time()))
+    except asyncio.TimeoutError as error:
+        raise VerificationError("NVIDIA_LOCAL_TIMEOUT") from error
+    except VerificationError:
+        raise
+    except (OSError, ValueError) as error:
+        raise VerificationError("NVIDIA_LOCAL_UNAVAILABLE") from error
+    finally:
+        if process is not None and process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if aggregate is not None:
+            # wait_for can finish cancellation before the original gathering
+            # future receives its children's CancelledError. Consuming only the
+            # individual tasks leaves that aggregate exception unobserved.
+            await asyncio.gather(aggregate, return_exceptions=True)
+        if process is not None and process.returncode is None:
+            # Drain pipes after termination; waiting with unread PIPE buffers
+            # alone can deadlock when the output bound triggered the failure.
+            try:
+                await asyncio.wait_for(process.communicate(), 5)
+            except (asyncio.TimeoutError, OSError):
+                pass
 
 
 async def verify_tdx(quote_hex):
@@ -351,7 +564,8 @@ def action_value(value):
     return False
 
 
-async def inspect_evidence(document, *, archived_bundle=None, verification_time=None, trusted_jwks=None):
+async def inspect_evidence(document, *, archived_bundle=None, verification_time=None,
+                           trusted_jwks=None, nvidia_local=None):
     """Real crypto verification only; does NOT authorize a workload or return ok."""
     require(isinstance(document, dict), "INPUT_INVALID")
     nonce = hex_bytes(document.get("nonce"), 32)
@@ -401,7 +615,20 @@ async def inspect_evidence(document, *, archived_bundle=None, verification_time=
     for evidence in payload["evidence_list"]:
         require(isinstance(evidence, dict) and isinstance(evidence.get("evidence"), str)
                 and isinstance(evidence.get("certificate"), str), "NVIDIA_INVALID")
-    if archived_bundle is None:
+    if nvidia_local is not None:
+        bundle = nvat_artifact(payload, nvidia_local)
+        if archived_bundle is None:
+            require(verification_time is None and trusted_jwks is None, "ARCHIVE_INVALID")
+        else:
+            require(type(verification_time) is int and trusted_jwks is None
+                    and archived_bundle == bundle, "ARCHIVE_INVALID")
+        gpu_models = await verify_nvidia_local(payload, nonce, nvidia_local)
+        # A new raw-evidence appraisal uses current signed RIM/OCSP collateral.
+        # Nothing here authenticates a historical local JSON/EAT or reestablishes
+        # an old TLS session. Certificate claims must cover the bounded lifetime.
+        now = int(time.time()) if verification_time is None else verification_time
+        nvidia_exp = now + 300
+    elif archived_bundle is None:
         require(verification_time is None and trusted_jwks is None, "ARCHIVE_INVALID")
         bundle, jwks = await asyncio.gather(
             asyncio.to_thread(http_json, "POST", NRAS_ORIGIN + "/v3/attest/gpu", payload),
@@ -412,7 +639,8 @@ async def inspect_evidence(document, *, archived_bundle=None, verification_time=
         # caller-supplied JWKs or token URLs as a verification trust anchor.
         require(type(verification_time) is int and isinstance(trusted_jwks, dict), "ARCHIVE_INVALID")
         bundle, jwks, now = archived_bundle, trusted_jwks, verification_time
-    gpu_models, nvidia_exp = verify_nvidia_tokens(bundle, jwks, nonce, len(payload["evidence_list"]), now)
+    if nvidia_local is None:
+        gpu_models, nvidia_exp = verify_nvidia_tokens(bundle, jwks, nonce, len(payload["evidence_list"]), now)
     measurements = {key: main[key] for key in MEASUREMENTS}
     return {"signingAddress": address.lower(), "tlsSpkiSha256": spki.hex(),
             "cpuStatus": "UpToDate", "gpuCount": len(gpu_models), "gpuModels": sorted(set(gpu_models)),
@@ -446,10 +674,11 @@ def model_verdict(document, policy, facts, now):
 async def verify(document, policy):
     require(isinstance(document, dict) and "archivedVerdict" not in document, "INPUT_INVALID")
     validate_policy(policy, time.time())
+    local = nvidia_local_config(policy)
     started = time.time()
-    facts = await inspect_evidence(document)
+    facts = await inspect_evidence(document, nvidia_local=local) if local else await inspect_evidence(document)
     now = int(time.time())
-    require(now - started <= 120, "VERIFICATION_TIMEOUT")
+    require(now - started <= (180 if local else 120), "VERIFICATION_TIMEOUT")
     return model_verdict(document, policy, facts, now)
 
 
@@ -457,6 +686,7 @@ async def verify_cloud(document, policy):
     """Verify the gateway and every advertised model candidate before inference."""
     require(isinstance(document, dict), "INPUT_INVALID")
     require("archivedVerdict" not in document, "INPUT_INVALID")
+    nvidia_local_config(policy)
     nonce = hex_bytes(document.get("nonce"), 32).hex()
     gateway_spki = hex_bytes(document.get("tlsSpkiSha256"), 32).hex()
     model = document.get("model")
@@ -514,9 +744,10 @@ def compare_archived_verdict(archived, reconstructed):
 
 
 async def verify_direct_archive(document, policy):
-    """Replay a saved direct-model verdict without replacing its signed NVIDIA bundle."""
+    """Replay signed NRAS evidence or re-appraise original local GPU raw evidence."""
     now = time.time()
     validate_policy(policy, now)
+    local = nvidia_local_config(policy)
     require(isinstance(document, dict), "INPUT_INVALID")
     nonce = hex_bytes(document.get("nonce"), 32).hex()
     spki = hex_bytes(document.get("tlsSpkiSha256"), 32).hex()
@@ -525,13 +756,13 @@ async def verify_direct_archive(document, policy):
             and "gateway_attestation" not in report and "model_attestations" not in report,
             "ARCHIVE_INVALID")
     recorded = archive_time(archived, now)
-    require(isinstance(archived.get("nvidiaEvidence"), list), "ARCHIVE_INVALID")
+    require(isinstance(archived.get("nvidiaEvidence"), dict if local else list), "ARCHIVE_INVALID")
     # Keep exactly the normalized input used by the original direct live path.
     # Including the archived verdict would change its policy/evidence reference.
     original = {"nonce": nonce, "tlsSpkiSha256": spki, "attestation": report}
-    jwks = await asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json")
+    jwks = None if local else await asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json")
     facts = await inspect_evidence(original, archived_bundle=archived["nvidiaEvidence"],
-                                   verification_time=recorded, trusted_jwks=jwks)
+                                   verification_time=recorded, trusted_jwks=jwks, nvidia_local=local)
     reconstructed = model_verdict(original, policy, facts, recorded)
     compare_archived_verdict(archived, reconstructed)
     validate_policy(policy, time.time())
@@ -547,6 +778,7 @@ async def verify_cloud_archive(document, policy):
     """
     now = time.time()
     validate_policy(policy, now)
+    local = nvidia_local_config(policy)
     validate_gateway_policy(policy, now)
     require(isinstance(document, dict), "INPUT_INVALID")
     nonce = hex_bytes(document.get("nonce"), 32).hex()
@@ -570,7 +802,7 @@ async def verify_cloud_archive(document, policy):
     compare_archived_verdict(gateway_archive, gateway)
     # This key source is fixed, CA-verified, has no redirects/proxy/netrc, and
     # rejects unknown key IDs. An archived/included JWK is never consulted.
-    jwks = await asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json")
+    jwks = None if local else await asyncio.to_thread(http_json, "GET", NRAS_ORIGIN + "/.well-known/jwks.json")
     verified = []
     for candidate, model_archive in zip(candidates, model_archives, strict=True):
         require(isinstance(candidate, dict) and candidate.get("model_name") == model
@@ -581,9 +813,9 @@ async def verify_cloud_archive(document, policy):
         provider_spki = hex_bytes(candidate.get("tls_cert_fingerprint"), 32,
                                   "MODEL_EVIDENCE_INVALID").hex()
         model_input = {"nonce": nonce, "tlsSpkiSha256": provider_spki, "attestation": candidate}
-        require(isinstance(model_archive.get("nvidiaEvidence"), list), "ARCHIVE_INVALID")
+        require(isinstance(model_archive.get("nvidiaEvidence"), dict if local else list), "ARCHIVE_INVALID")
         facts = await inspect_evidence(model_input, archived_bundle=model_archive["nvidiaEvidence"],
-                                       verification_time=model_time, trusted_jwks=jwks)
+                                       verification_time=model_time, trusted_jwks=jwks, nvidia_local=local)
         verdict = model_verdict(model_input, policy, facts, model_time)
         compare_archived_verdict(model_archive, verdict)
         verified.append(verdict)

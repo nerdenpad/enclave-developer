@@ -54,7 +54,7 @@ describe("settlement chain scope", () => {
     await expect(settlementScope(config)).resolves.toBe([config.ARC_CHAIN_ID, genesisHash, config.USDC_ADDRESS, config.USAGE_METER_ADDRESS, payer.toLowerCase()].join(":"));
     expect(rpc.getBlock).toHaveBeenCalledExactlyOnceWith({ blockNumber: 0n });
     expect(createPublicClient).toHaveBeenCalledWith(expect.objectContaining({ chain: expect.objectContaining({ id: config.ARC_CHAIN_ID }) }));
-    expect(http).toHaveBeenCalledWith(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1 });
+    expect(http).toHaveBeenCalledWith(config.ARC_RPC_URL, { timeout: 15_000, retryCount: 1, batch: false, fetchFn: expect.any(Function) });
   });
 
   it("rejects an RPC serving another chain before retrieving genesis", async () => {

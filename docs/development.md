@@ -1,6 +1,6 @@
 # Development
 
-Run commands from the repository root. See the [project overview](../README.md) for the hosted pilot and current status.
+Run commands from the repository root. See the [project overview](../README.md) for the hosted production deployment and current status.
 
 ## Local deployment
 
@@ -50,8 +50,8 @@ After `npm run demo:prepare`, `npm run test:launch` starts the combined services
 
 ## Trust and deployment boundaries
 
-NEAR can supply verified remote GPU inference. Request encryption terminates at the application gateway. Local settlement uses test USDC on Anvil chain 31337. The dashboard does not submit real-network wallet authorizations or start autonomous agent jobs.
+NEAR supplies verified remote GPU inference on the hosted deployment. Request encryption terminates at the application gateway. The local launcher uses test USDC on Anvil chain 31337. The hosted dashboard uses separately configured Arc Mainnet wallet authorization and settlement. Autonomous agent scheduling is opt-in.
 
-The local launcher does not publish a public website. The hosted pilot uses an HTTPS reverse proxy and issued pilot API keys; production requires a user authentication layer. The Vite proxy and operator API-key field are development facilities. The backend rejects production mode until the NEAR Gateway release profile and deployed-path acceptance are implemented.
+The local launcher does not publish a public website. The hosted production deployment uses HTTPS, wallet sign-in, scoped sessions and owner-specific records. The Vite proxy and operator API-key field are development facilities. Production startup requires an exact reviewed release manifest, verified archived and fresh provider evidence, approved model policy and current contract bindings; see [NEAR + Arc release](near-arc-release.md).
 
 Secrets, local `.env` profiles, runtime keys, virtual environments, dependency folders, new recordings and generated runtime files are excluded from Git. The reviewed walkthrough in `deliverables/` is tracked separately. Only configuration examples belong in a commit. This combined repository is independent of the original frontend's Lovable connection.

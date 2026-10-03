@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { encodeAbiParameters, encodeEventTopics, maxUint256, zeroHash, type Hex } from "viem";
+import { encodeAbiParameters, encodeEventTopics, http, maxUint256, zeroHash, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "@enclave/db";
 import { loadConfig } from "./config.js";
 import { createTcbRegistry, tcbRegistryAbi, verifyTcbApproval, type TcbChainBinding } from "./tcb-chain.js";
 
 const mocks = vi.hoisted(() => ({ chain: vi.fn(), block: vi.fn(), read: vi.fn(), send: vi.fn(), confirm: vi.fn() }));
-vi.mock("viem", async (original) => ({ ...await original<typeof import("viem")>(), createPublicClient: () => ({ getChainId: mocks.chain, getBlock: mocks.block, readContract: mocks.read }) }));
+vi.mock("viem", async (original) => ({ ...await original<typeof import("viem")>(), http: vi.fn(() => ({ name: "mock-transport" })), createPublicClient: () => ({ getChainId: mocks.chain, getBlock: mocks.block, readContract: mocks.read }) }));
 vi.mock("@enclave/db", async (original) => ({ ...await original<typeof import("@enclave/db")>(), sendDurableTransaction: mocks.send, confirmDurableTransaction: mocks.confirm }));
 const cfg = loadConfig({ DATABASE_URL: "postgres://unit.invalid/tcb", ARC_CHAIN_ID: "31337", ARC_RPC_URL: "http://unit.invalid/rpc",
   MODEL_REGISTRY_ADDRESS: "0x0000000000000000000000000000000000001100", ENCL_TOKEN_ADDRESS: "0x0000000000000000000000000000000000001200" });
@@ -122,6 +122,9 @@ describe("durable policy listing", () => {
     expect(mocks.send).toHaveBeenNthCalledWith(1, opts, `tcb-list:${cfg.MODEL_REGISTRY_ADDRESS}:request-1:approve`, expect.objectContaining({ address: cfg.ENCL_TOKEN_ADDRESS, functionName: "approve", args: [cfg.MODEL_REGISTRY_ADDRESS, maxUint256] }));
     expect(mocks.send).toHaveBeenNthCalledWith(2, opts, `tcb-list:${cfg.MODEL_REGISTRY_ADDRESS}:request-1:list`, expect.objectContaining({ functionName: "listWithPolicy", args: [binding.modelHash, binding.codeHash, 125, binding.policyHash, 7n] }));
     expect(mocks.confirm).toHaveBeenCalledWith(opts, approveTx); expect(mocks.confirm).toHaveBeenCalledWith(opts, listTx);
+    const fetchFn = vi.mocked(http).mock.calls[0]![1]!.fetchFn;
+    expect(fetchFn).toBeTypeOf("function");
+    for (const [options] of [...mocks.send.mock.calls, ...mocks.confirm.mock.calls]) expect(options.fetchFn).toBe(fetchFn);
   });
   it("reuses stable durable operation keys for retries and omits approval when no stake is required", async () => {
     mocks.read.mockImplementation((call) => call.functionName === "listingStake" ? 0n : read(call));

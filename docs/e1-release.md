@@ -1,28 +1,33 @@
 # E1 release acceptance
 
-E1 status: **open**. Arc Mainnet contracts are deployed and the API supports authorized settlement; public browser checkout remains disabled. Hosted inference and a small real-USDC browser payment still need acceptance with strict verification. A GitHub push is source delivery, not deployment by itself.
+E1 public launch status: **open**. The hosted backend runs the accepted NEAR + Arc production profile. Serving policy version 2 is registered, approved and activated. A real CPU/GPU-verified hosted request, signed receipt, 0.10 USDC settlement, canonical Arc anchor and exact completed-result replay after a service restart passed operator acceptance on 1 October 2026. A second real paid request passed through browser WalletConnect, including navigation/reload, local receipt verification, JSON/CSV export and independent Arc verification.
+
+A third **0.10 USDC** test returned the complete final answer `READY` with `finish_reason: stop`; reasoning was separate from final content. It used renewed reviewed provider policy version 5, thinking enabled and a 512-token cap. Its strict archived and fresh hardware startup checks passed after a production restart. Aggregate confirmed acceptance usage is **three calls and 0.30 USDC**. The earlier 32-token requests prove the protocol paths, not complete-answer quality.
+
+Public browser checkout is enabled at the approved **0.10 USDC per request**. Manual wallet acceptance: passed, confirmed by the project owner on **3 October 2026**. Live settlement interruption, signer rotation and model revocation acceptance remain open. A GitHub push is source delivery, not deployment by itself. See the dated [release progress](release-progress.md) for transaction links, limits and remaining scenarios.
 
 The selected inference route is experimental direct NEAR using the exact reviewed `<model-label>.completions.near.ai/v1` endpoint. Its experimental label remains visible on `/status`. The selected route must pass pinned provider policy, node CPU/GPU evidence, TLS/signer binding and exact signed transcript checks before acceptance; choosing it does not mark E1 live.
 
 ## Available now
 
-- `/dashboard`: encrypted requests, explicit development payment confirmation, signed receipts and persisted owner history.
+- `/dashboard`: encrypted requests, configured network/payment mode, signed receipts and persisted owner history. Public Arc checkout is gated separately from backend readiness.
 - `/verify`: import a single exported receipt, check its EIP-712 signature locally, then optionally check contract acceptance, model policy binding and the anchor event through an explicitly selected RPC.
 - `/status`: public inference route, reported release stage/readiness, network, model, gateway/provider policy, signer, verifier, configured token, price and inference limits. No API key is needed.
-- NEAR managed inference with remote CPU/GPU evidence verification. Hosted-path acceptance remains separate.
+- NEAR managed inference with remote CPU/GPU evidence verification. Three real paid requests passed receipt/Arc verification; the third returned a complete final answer. Exact archived evidence and fresh production hardware checks passed under renewed provider policy version 5.
 
 ## Acceptance matrix
 
 | Requirement | Current evidence | Remaining work before release |
 | --- | --- | --- |
-| Public HTTPS prompt flow | Hosted pilot, HTTPS and a separate non-admin pilot API key; local browser tests | Production user authentication and acceptance on the final infrastructure |
-| Verified NEAR GPU inference | Remote CPU/GPU verification is implemented for experimental direct and Cloud Gateway routes | Complete a fresh hosted request through the selected exact direct endpoint; independently replay its pinned node policy, hardware evidence and signed request/response transcript |
-| Signed inference receipt | Receipt versions 1/2; model/code/input/output/attestation hashes and signature checked | Prove the configured signer and request path on the accepted deployment |
-| On-chain verification and policy | Contracts and isolated Anvil acceptance; public verifier UI; Arc Mainnet contracts deployed | Confirm policy bindings, signer, anchoring and confirmations on Arc |
-| USDC without duplicate charge/execution | Arc contracts deployed; API `authorized` on `5042`; relay funded; browser checkout flag still false | One accepted small real-USDC browser payment with restart/recovery evidence; then enable the public checkout flag |
-| Verify receipt page | Public `/verify`, local checks plus RPC contract/policy/anchor checks | Repeat checks against the accepted production network |
-| Production mode | Managed NEAR + Arc release profile with exact route, manifest, pinned policy, signer, archived node/transcript verification and on-chain admission guards | Complete hosted acceptance and provide the reviewed release manifest before enabling the production deployment |
-| Public runtime details | `/status`, no credentials required | Publish the accepted production deployment and its operator-reviewed trust roots and limits |
+| Public HTTPS prompt flow | Real HTTPS WalletConnect sign-in and paid browser request; login survives home navigation and reload; owner-confirmed manual wallet acceptance passed on 3 October 2026 | Retain the acceptance record and its scope |
+| Verified NEAR GPU inference | Real hosted API/browser direct-NEAR requests; strict CPU/GPU evidence, reviewed node policy, TLS identity and signed transcript checked; third request returned complete `READY`/`stop` under provider policy v5 | Retain operational failure acceptance and renew reviewed policy before expiry |
+| Signed inference receipt | Accepted API and browser receipts bind model/code/input/output/attestation hashes; configured signatures verified | Retain verification evidence for subsequent releases |
+| On-chain verification and policy | Arc policy v2 approved and activated; real receipt anchor and exact canonical Verified event confirmed with 12 successor blocks | Include model revocation and signer rotation in final release acceptance without losing retained evidence |
+| USDC without duplicate charge/execution | Approved tariff of 0.10 USDC; three calls/0.30 USDC with one settlement per intent; completed-request restart replay preserved exact output/receipt; durable dispatch quarantine passed fault tests | Complete interruption during live settlement and recovery from that interruption |
+| Verify receipt page | Frontend local signature and read-only RPC verification passed for the initial API/browser receipts, policies and anchors; browser receipt dialog and JSON/CSV export passed | Retain independently approved trust settings |
+| Production mode | Renewed reviewed manifest/policy v5 and archive installed; strict production restart passed archived and fresh hardware checks; API reports production/ready with NEAR + Arc profile | Keep acceptance and provider policy current; complete public launch gates |
+| Public frontend delivery | Checkout enabled at 0.10 USDC; atomic asset/output installation passed HTTPS JS hash/MIME and canonical page checks; original motion at normal 1× speed and centered desktop/mobile footer verified; owner-confirmed manual wallet acceptance passed on 3 October 2026 | Retain published motion checks after each rollout |
+| Public runtime details | `/status` and home report deployed stage, Arc, model, policies, signer, price and limits without credentials | Record subsequent acceptance and rollout updates |
 
 ## Infrastructure inputs
 
@@ -37,7 +42,7 @@ Do not put provider keys, deployer keys, RPC credentials or deployment profiles 
 3. Configure the site and `/api` on one HTTPS origin with user authentication, request limits and persistent databases.
 4. Exercise a small, approved paid request; verify its receipt and anchor; restart during uncertain payment/inference states and confirm no second debit or generation.
 5. Include model revocation, signer rotation, rejected evidence and chain reorganization in acceptance.
-6. Publish the domain, network/contracts, model, policy versions, known limits and acceptance evidence. Only then enable the production CTA and describe E1 as live.
+6. Publish the domain, network/contracts, model, policy versions, known limits and acceptance evidence. Enable reviewed checkout after its own acceptance; describe E1 as live only after the remaining release acceptance is complete.
 
 ## Verification commands
 

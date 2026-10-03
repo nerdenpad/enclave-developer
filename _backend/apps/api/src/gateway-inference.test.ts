@@ -9,8 +9,10 @@ import * as near from "./near-provider.js";
 import { TcbLifecycle } from "./tcb-lifecycle.js";
 import * as releaseProfile from "./release-profile.js";
 import * as tcbChain from "./tcb-chain.js";
+import * as runtimeWiring from "./runtime-contract-wiring.js";
 
 beforeEach(() => {
+  vi.spyOn(runtimeWiring, "verifyRuntimeContractWiring").mockResolvedValue();
   const policy = { version: 1, servingImageId: "enclave-echo-v1", requireCpuTee: true, requireGpuCc: true } as const;
   vi.spyOn(TcbLifecycle.prototype, "current").mockResolvedValue({ ...core.tcbPolicyRecord(policy), policy,
     status: "active", binding: "legacy", scope: null, activatedAt: null, createdAt: new Date(0).toISOString(), trustMode: "development-software" });
@@ -68,6 +70,23 @@ describe("gateway inference adapter configuration", () => {
     await expect(fixture.admission.assertNewPaymentAdmission()).rejects.toThrow("Model revoked");
     expect(fixture.hook).toHaveBeenCalledOnce(); expect(fixture.fetch).not.toHaveBeenCalled();
   });
+  it("stops new payments immediately when the on-chain receipt signer or routing changes", async () => {
+    const fixture = await productionGateway();
+    vi.mocked(runtimeWiring.verifyRuntimeContractWiring).mockRejectedValueOnce(new core.AppError("PAYMENTS_RUNTIME_MISMATCH", "Signer rotated", 409));
+    await expect(fixture.admission.assertNewPaymentAdmission()).rejects.toMatchObject({ code: "PAYMENTS_RUNTIME_MISMATCH" });
+    expect(fixture.hook).toHaveBeenCalledOnce(); expect(fixture.fetch).not.toHaveBeenCalled();
+    expect(fixture.gateway.health().deployment.productionReady).toBe(false);
+  });
+  it("requires a fresh successful wiring check after an unavailable RPC before restoring admission", async () => {
+    const fixture = await productionGateway();
+    vi.mocked(runtimeWiring.verifyRuntimeContractWiring).mockRejectedValueOnce(new core.AppError("PAYMENTS_RUNTIME_UNAVAILABLE", "RPC unavailable", 503));
+    await expect(fixture.admission.assertNewPaymentAdmission()).rejects.toMatchObject({ code: "PAYMENTS_RUNTIME_UNAVAILABLE" });
+    expect(fixture.gateway.health().deployment.productionReady).toBe(false);
+    await fixture.admission.assertNewPaymentAdmission();
+    expect(runtimeWiring.verifyRuntimeContractWiring).toHaveBeenCalledTimes(3);
+    expect(fixture.hook).toHaveBeenCalledTimes(2); expect(fixture.fetch).not.toHaveBeenCalled();
+    expect(fixture.gateway.health().deployment.productionReady).toBe(true);
+  });
   it("also verifies hardware before real payment admissions in a managed pilot", async () => {
     const config = loadConfig({ DATABASE_URL: "postgres://unit.invalid/test", NODE_ENV: "test", TEE_MODE: "managed-near", INFERENCE_BACKEND: "near-verified",
       NEAR_ENDPOINT_PROFILE: "direct-experimental", INFERENCE_BASE_URL: "https://test.completions.near.ai/v1", INFERENCE_MODEL: "Qwen/Test", INFERENCE_ALLOW_REMOTE: "true",
@@ -117,7 +136,7 @@ describe("gateway inference adapter configuration", () => {
     const gateway = await EnclaveGateway.boot({} as Parameters<typeof EnclaveGateway.boot>[0], config, createLogger("silent"), undefined);
     expect(makeVerifier).toHaveBeenCalledExactlyOnceWith({ pythonPath: "fixture-python", policyPath: "fixture-policy.json", apiKey: "near-test-secret" });
     expect(adapter).toHaveBeenCalledExactlyOnceWith({ baseUrl: config.INFERENCE_BASE_URL, model: "Qwen/Test", apiKey: "near-test-secret",
-      timeoutMs: 120_000, maxTokens: 128, verifyAttestation: hook });
+      timeoutMs: 120_000, maxTokens: 128, enableThinking: false, verifyAttestation: hook });
     expect(cvm.mock.calls[0]![0].verifiedInference).toBeTypeOf("function");
     expect(cvm.mock.calls[0]![0].inference).toBeUndefined();
     expect(generic).not.toHaveBeenCalled();
@@ -126,6 +145,35 @@ describe("gateway inference adapter configuration", () => {
     expect(hook).toHaveBeenCalledOnce();
     expect(gateway.health()).toMatchObject({ teeMode: "dev" });
     expect(JSON.stringify(gateway.health())).not.toContain("near-test-secret");
+  });
+  it("sends the configured thinking control and output budget through the verified transport", async () => {
+    const config = loadConfig({ DATABASE_URL: "postgres://unit.invalid/test", NODE_ENV: "test", INFERENCE_BACKEND: "near-verified",
+      INFERENCE_BASE_URL: "https://test.completions.near.ai/v1", INFERENCE_MODEL: "z-ai/glm-5.3-flash", INFERENCE_ALLOW_REMOTE: "true",
+      INFERENCE_API_KEY: "near-test-secret", INFERENCE_TIMEOUT_MS: "180000", NEAR_VERIFIER_PYTHON: "fixture-python",
+      NEAR_ATTESTATION_POLICY: "fixture-policy.json", NEAR_ENABLE_THINKING: "true", NEAR_MAX_TOKENS: "512" });
+    const signer = privateKeyToAccount(`0x${"55".repeat(32)}`);
+    const responseBody = JSON.stringify({ id: "chat_fixture", model: config.INFERENCE_MODEL,
+      choices: [{ message: { content: "READY", reasoning_content: "Private fixture reasoning" }, finish_reason: "stop" }] });
+    let requestBody = "";
+    const transport = vi.fn<core.NearVerifiedFetch>().mockImplementation(async (_url, init) => {
+      if (init.method === "POST") { requestBody = String(init.body); return new Response(responseBody); }
+      const signatureText = `${config.INFERENCE_MODEL}:${core.sha256Hex(requestBody).slice(2)}:${core.sha256Hex(responseBody).slice(2)}`;
+      return Response.json({ text: signatureText, signature: await signer.signMessage({ message: signatureText }),
+        signing_address: signer.address, signing_algo: "ecdsa" });
+    });
+    const close = vi.fn();
+    const hook = vi.fn<core.NearAttestationVerifier>().mockResolvedValue({ allowedSigners: [signer.address], tlsBound: true,
+      attestationRef: `0x${"45".repeat(32)}`, verifiedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 120_000).toISOString(), fetch: transport, close });
+    vi.spyOn(near, "createNearAttestationVerifier").mockReturnValue(hook);
+    const cvm = vi.spyOn(core.DevCvm, "create");
+    await EnclaveGateway.boot({} as Parameters<typeof EnclaveGateway.boot>[0], config, createLogger("silent"), undefined);
+    expect(transport).not.toHaveBeenCalled();
+    const result = await cvm.mock.calls[0]![0].verifiedInference!(Buffer.from("Reply with READY"));
+    expect(JSON.parse(requestBody)).toMatchObject({ max_tokens: 512, chat_template_kwargs: { enable_thinking: true } });
+    expect(result.output.toString()).toBe("READY");
+    expect(await core.verifyNearTranscript(result.evidence, result.transcript)).toBe(true);
+    expect(hook).toHaveBeenCalledOnce(); expect(close).toHaveBeenCalledOnce();
   });
   it("wires authenticated remote HTTPS settings into the software CVM without exposing its key", async () => {
     const config = loadConfig({ DATABASE_URL: "postgres://unit.invalid/test", NODE_ENV: "test", INFERENCE_BACKEND: "openai-compatible",
