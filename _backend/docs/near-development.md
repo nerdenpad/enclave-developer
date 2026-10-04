@@ -1,8 +1,8 @@
 # NEAR GPU development
 
-NEAR is the selected GPU TEE inference provider. This profile verifies a managed NEAR model before sending it a prompt. `NODE_ENV=production` remains gated. The provider proof covers remote execution; gateway release requirements are tracked separately. NEAR remains the selected provider.
+NEAR is the selected GPU TEE inference provider. This profile verifies a managed NEAR model before sending it a prompt. Production configuration requires a reviewed release manifest and strict archived/fresh verification. The hosted deployment passed fresh paid operator EOA acceptance under reviewed provider policy v6 on 4 October 2026; see the dated [release progress](../../docs/release-progress.md) for readiness and remaining E1 checks. The provider proof covers remote execution; gateway release requirements are tracked separately.
 
-See [the NEAR Gateway deployment path](near-gateway-deployment.md) for the remaining release work. The inference key is used only for provider requests.
+The hosted route is experimental direct NEAR. See [the NEAR release routes](near-gateway-deployment.md) and [accepted release profile](../../docs/near-arc-release.md). The inference key is used only for provider requests.
 
 ## Setup
 

@@ -1,20 +1,203 @@
-# Release progress — 3 October 2026
+# Release progress — 4 October 2026
 
-The backend runs with `NODE_ENV=production` and a historically accepted NEAR + Arc
-release manifest. New payment/inference admission is currently blocked because
-the provider admission check rejects an unapproved workload profile. Its review
-and fresh acceptance remain open; earlier startup and health checks establish
-historical acceptance rather than current admission readiness.
-The technical payment-to-receipt path passed acceptance on 1 October 2026. Manual
-wallet acceptance is reopened after a detailed OKX failure report and awaits
-retest. Public E1 launch remains open until current provider acceptance, that
-retest and the remaining live failure acceptance are complete.
-A real browser WalletConnect payment journey also passed on 1 October.
-The commercial price is approved at **0.10 USDC per request**. A third paid test
-returned a complete final answer; aggregate acceptance usage is **three calls and
-0.30 USDC**. Public checkout is enabled on the published frontend.
+The backend runs with `NODE_ENV=production`, reviewed provider policy v6 and its
+new accepted NEAR + Arc release manifest. A fresh operator EOA request passed
+strict provider verification, a complete answer, **0.10 USDC** settlement, receipt
+and confirmed Arc anchor on **4 October 2026**. Production startup independently
+verified archived evidence and fresh provider admission. Public HTTPS health at
+**10:06:57 UTC** reported `stage: production`, `productionReady: true` and
+`providerAdmissionReady: true`.
 
-## Completed
+The approved price is **0.10 USDC per request**. Confirmed acceptance usage is
+**four calls and 0.40 USDC**, with one settlement per intent. Completed-result
+replay after the actual production API restart returned the same result without
+additional payment, usage or execution. Every new request still needs fresh
+provider verification; the experimental direct route has no availability guarantee.
+
+The earlier WalletConnect operator browser acceptance and the 3 October OKX
+regression remain recorded below. The physical OKX retest on 4 October stopped
+at provider admission before settlement. Full E1 launch acceptance remains open;
+the morning success is dated evidence, not a guarantee of current provider readiness.
+
+## Provider fleet check — 4 October 2026
+
+Fresh checks through the deployed verifier passed at **18:34:38 UTC** and
+**18:44:33 UTC**, with `UpToDate` CPU status, eight verified GPUs and the exact
+approved 94-action profile. A separate bounded direct-route collection then
+verified **10 of 10** fresh CA/SPKI/nonce-bound reports; its last appraisal
+completed at **18:50:56 UTC**. All ten reports matched that same complete profile.
+They are ten observations, not ten different configurations or proof of full
+fleet coverage.
+
+The installed policy still contains **four distinct approved profiles**, with
+schema capacity for 32. The requested minimum of ten is **not achieved**: six
+additional eligible profiles have not been found. The local evidence inventory
+contains four current approvals, a historical 134-action configuration and an
+unapproved 146-action candidate. An authenticated Cloud API discovery GET at
+**18:52:47 UTC** returned one advertised 146-action model candidate; discovery
+alone does not verify or approve it. Its unresolved runtime/source review
+remains required before admission.
+
+Public health at **18:54:50 UTC** reported `stage: production`,
+`productionReady: true` and `providerAdmissionReady: true`. The private sampler
+passed 11 offline tests, preserves exact whole-profile matching and rejects
+duplicate policy entries when counting profiles. Its initial launch from an
+inaccessible working directory was excluded from the hardware assessment;
+the corrected launch used the same working directory as the API. Private raw
+evidence, profile records and status records were retained with checked hashes.
+No provider policy, key, accepted release, payment or inference was changed or
+submitted during these checks. Physical OKX paid acceptance remains open.
+
+## Stable production mode — 4 October 2026
+
+Deployment stage now follows the configured runtime mode. A deployment running
+with `NODE_ENV=production` continues to report `stage: production` after provider
+rejection or release-evidence expiry. `productionReady` and
+`providerAdmissionReady` remain separate checks. The website displays
+**PRODUCTION · PROVIDER UNAVAILABLE** after provider admission fails, or
+**PRODUCTION · NOT READY** when another readiness condition fails. New payment
+and inference requests remain gated by strict verification.
+
+The compatible frontend was installed before the reporting-only backend change.
+Exactly seven frontend sources changed; the deployed dashboard recovery bytes
+were retained. Only one backend source changed (`gateway.ts`), with its delta
+limited to the stage expression and an explanatory comment. Website and API
+services restarted; keys, provider policy, accepted evidence and payment
+configuration retained their hashes and permissions.
+
+API TypeScript and 26 readiness/inference tests passed. Frontend TypeScript,
+115 unit tests and 25 deployment guards passed; all six intercepted health
+browser cases also passed against the deployed output. An isolated boot and
+the actual API restart passed accepted-archive, Arc contract and fresh provider
+checks. Public HTTPS health at **18:24:32 UTC** reported `stage: production`,
+`productionReady: true` and `providerAdmissionReady: true`, with HTTP 200 and
+`Cache-Control: no-store`. These checks sent no new payment or inference and do
+not close the physical OKX paid acceptance scenario.
+
+The installed NEAR fleet policy accepts four reviewed complete workload
+profiles. Admission is not pinned to a node IP or an individual GPU serial;
+each node must match a reviewed profile and pass fresh CPU, GPU and connection
+binding checks. An unknown workload still requires review and a renewed pinned
+policy/evidence package. Hardware validity or a matching model name alone does
+not approve a new serving build. The direct route can therefore still reject an
+unreviewed member of the provider fleet.
+
+## Physical OKX retest — 4 October 2026
+
+The 19:34–20:06 Moscow test connected OKX and completed free wallet sign-in after
+reloading an old tab. A 0.10 USDC authorization was approved in the wallet, but
+the settlement request stopped before a debit, inference execution or receipt
+was recorded. The dashboard retained the original operation for explicit recovery.
+
+The API journal at **16:57:03.740 UTC** records
+`INFERENCE_ATTESTATION_FAILED` / `WORKLOAD_NOT_APPROVED` for
+`/v1/x402/settle`. This identifies an unapproved workload profile; it does not
+identify which provider node served the attempt. The journal correlation is by
+endpoint and test window because that log entry does not include the payment ID.
+Provider health changed from production/ready to pilot/not ready after rejection.
+
+Read-only database and Arc checks at **17:30:25 UTC** found payment
+`372ae708-014a-46fc-83cd-89d976089d30` still `open`, with no settlement transaction,
+stored authorization, inference execution or receipt. UsageMeter returned
+`settled=false` at canonical block **24255756**, with **12 successor blocks**.
+This establishes the status of this exact payment intent, not arbitrary wallet
+transfers. No payment or inference was submitted during these checks.
+
+The test preceded deployment of the sign-in cancellation fix described below.
+Physical OKX acceptance on the updated frontend remains open. The stale dashboard
+readiness display was corrected and deployed separately later that evening; this
+does not resolve provider admission or establish a successful paid wallet journey.
+
+## Dashboard readiness refresh — 4 October 2026
+
+The website now reads current health during workspace refresh. A strict provider
+rejection immediately invalidates the old ready display and triggers a health
+read. An older response cannot restore readiness after a newer rejection. A
+failed health read displays **Status unavailable** and blocks a new request;
+wallet login, existing history and the original payment recovery remain intact.
+Recovery continues only through an explicit user action, with the original
+authorization and request preserved. No payment is retried by status refresh.
+
+The isolated release changed only dashboard code and its checkout fixture, with
+182 other files byte-identical to the deployed 184-file baseline. TypeScript,
+seven focused browser cases and 24 deployment guards passed. All six new health
+cases also passed against the deployed Node output, using intercepted APIs and
+an unfunded synthetic wallet. No real payment, provider inference or physical OKX
+acceptance was performed during this rollout. Page, asset and HTTP 404 guards passed.
+
+Only the website service restarted. Backend code, keys, provider policy and
+checkout configuration were retained. Post-deploy health still reported
+`stage: pilot` and `productionReady: false`. At that rollout the stage was
+computed from readiness; `NODE_ENV=production` had not changed. The later
+[stable-mode correction](#stable-production-mode--4-october-2026) separates the
+stage from readiness. Physical-wallet acceptance remains open.
+
+## Wallet sign-in recovery — 4 October 2026
+
+A frontend-only recovery fix was deployed after the report of a hung OKX sign-in
+in an old dashboard tab. Pending login is cancelled when the wallet disconnects,
+expires or changes; a 60-second limit releases the sign-in button and displays
+recovery instructions. Old attempt completion cannot publish a stale login or
+unlock a replacement attempt. A late server-issued login is explicitly revoked.
+
+The exact isolated release passed TypeScript, 91 wallet unit tests, three browser
+regressions and 27 deployment/preparation guards. All three browser scenarios
+also passed against the deployed Node output, using synthetic signatures and
+intercepted API responses. No real wallet approval, inference or payment was
+submitted during this rollout. A physical OKX retest remains open.
+
+Only the website service restarted. Backend code, provider policy, keys,
+contracts and the approved 0.10 USDC tariff were retained. At the frontend rollout,
+public health reported `stage: pilot` and `productionReady: false`; the earlier
+10:06:57 UTC provider acceptance remains historical evidence. The frontend QA
+installation accepted that reported state without changing provider admission
+or payment gates. Tabs already running the older code need one reload to load
+this fix. See [wallet recovery](wallet-payments.md#sign-in-recovery--4-october-2026).
+
+## Provider admission and paid acceptance — 4 October 2026
+
+The admission fix permits up to **three attestation-only candidate connections**
+when the direct verifier rejects an unapproved workload. Each connection uses a
+fresh nonce, normal CA/hostname/TLS binding, strict CPU/GPU checks and the same
+exact pinned policy bytes. Rejected connections are closed and one original
+deadline covers all candidates. Other verification failures are terminal;
+inference POSTs are never repeated by this mechanism. Unapproved workloads remain
+unapproved and all candidates can still fail admission.
+
+Reviewed provider policy v6 passed a fresh hardware check at **09:26:35 UTC**,
+including `UpToDate` CPU status and eight verified GPUs under an exact previously
+reviewed complete profile. One operator EOA request then returned final content
+exactly `READY` with `finish_reason: stop`; thinking remained enabled and the
+generation cap was 512 tokens. Its signed transcript, receipt, **0.10 USDC**
+settlement and canonical Arc anchor passed strict acceptance.
+
+| Operation | Confirmed transaction |
+| --- | --- |
+| Settle v6 acceptance 0.10 USDC | [UsageMeter settlement](https://explorer.arc.io/tx/0xed2f012b67fe7003eea55e9b5486c483f70e122a20ec2cc48f440d675b4831db) |
+| Anchor v6 acceptance receipt | [AttestationVerifier anchor](https://explorer.arc.io/tx/0xb4c045581b6a999783140f67ac6320051374c24da3a557433d198ea020d97d39) |
+
+The signed receipt hash is
+`0xd02e73d8c7958e1838ca74c9f14b483a78dbdde62c4e2d0f3782bb171245a8f2`.
+Provider policy v6 has SHA-256
+`75abdd6f7e2a075863b71afa68a7e7dddb43115f3834b6428ace33a228d89ffa`.
+The installed accepted manifest has SHA-256
+`c796792667d7e269dae9502be220b69c567a5671e2645e9069fd643e505c1da1`.
+The review and acceptance expire on **8 October 2026 at 14:29:11 UTC**;
+this rollout did not extend that deadline.
+
+The production API restarted at **10:02:37 UTC** and passed archived-evidence,
+contract/policy/signer and fresh provider startup checks. An explicit replay
+of the original completed request returned the exact same
+response, payment, receipt, settlement and anchor. Before/after database and
+canonical chain readbacks retained **four calls and 0.40 USDC**, with no new
+payment, usage or execution. This post-restart proof is retained separately;
+the accepted manifest's original bytes were not rewritten to include it.
+
+This run exercised an operator EOA and the deployed backend. It did not exercise
+the physical OKX wallet-app UI. The temporary private acceptance service was
+stopped; the public API, website and worker remained active.
+
+## Earlier completed acceptance — 1 October 2026
 
 - The site and API are served through HTTPS at [enclaveagent.tech](https://enclaveagent.tech).
 - The selected inference route is experimental direct NEAR. CPU/GPU evidence,
@@ -133,11 +316,12 @@ was `false` for the `keccak256`-derived intent of payment
 for that exact intent at that block; it does not rule out other wallet transfers.
 The read-only check sent no payment or inference request.
 
-The current provider rollout requires further review. The policy **version 6
-candidate is not installed and has not passed fresh provider acceptance**.
-New payment/inference admission remains blocked. Web corrective fixes were
-deployed on 3 October 2026; a real OKX retest
-and current provider workload acceptance remain open. The three successful 1 October
+At the 3 October review, provider policy **version 6 was a candidate and had not
+been installed or freshly accepted**. New payment/inference admission was
+blocked. Web corrective fixes were deployed that day; a real OKX retest and
+current provider workload acceptance were open. Provider v6 paid acceptance and
+installation completed separately on 4 October; the physical OKX retest remains
+open. The three successful 1 October
 acceptance calls and their **0.30 USDC** of confirmed settlements remain recorded
 above.
 
@@ -150,11 +334,11 @@ The deployed source manifest has SHA-256
 the installed build output has SHA-256
 `8f0d7191087b079ed11d4c10fd6063313a7b1c0146e22a2409c8133e759810cf`.
 
-This web rollout supplies no new paid inference acceptance. Strict NEAR workload
-drift review remains open, and new payment/inference admission remains blocked.
-Physical WalletConnect/manual wallet acceptance is reopened; a real OKX retest
-is still pending. The recorded successful paid acceptance remains three calls
-and **0.30 USDC**.
+This web rollout supplied no new paid inference acceptance. At that time, strict
+NEAR workload review was open and new payment/inference admission was blocked.
+Physical WalletConnect/manual wallet acceptance was reopened; a real OKX retest
+is still pending. Confirmed paid acceptance at that review was three calls and
+**0.30 USDC**. The separate 4 October backend acceptance is recorded above.
 
 ## Backend readiness correction — 3 October 2026
 
@@ -181,21 +365,20 @@ the installed backend inventory has SHA-256
 `2aa9a3e0717a06a854c4908bd40f74e1a2c02231562bbba167991172005cb90c`.
 The full API suite passed **899/899 tests**, and API TypeScript checking passed.
 The rollout sent no payment or inference request and supplies no new paid
-acceptance. Current provider review and the physical OKX retest remain open;
-historical confirmed acceptance remains **three calls and 0.30 USDC**.
+acceptance. At that review, provider acceptance and the physical OKX retest were
+open; confirmed acceptance was **three calls and 0.30 USDC**. The 4 October
+provider admission fix and newly accepted release are recorded above.
 
 ## Remaining acceptance
 
-1. Complete strict review and fresh acceptance of the current NEAR provider
-   workload before reopening new payment/inference admission.
-2. Retest the manual OKX connection, sign-in and payment journey against the
-   deployed web fixes once provider admission is accepted. Manual wallet acceptance
-   is open.
-3. Complete interruption during live settlement and recovery acceptance. A
+1. Retest the physical OKX connection, sign-in and payment journey against the
+   deployed web fixes and newly accepted provider v6 release. Manual wallet
+   acceptance is open.
+2. Complete interruption during live settlement and recovery acceptance. A
    restart of a completed request was exercised on the hosted service; rejected,
    cancelled, exact retry and uncertain-execution UI cases passed fixture tests.
    These checks do not establish recovery from an interrupted live settlement.
-4. Complete signer rotation and model revocation against the production contracts.
+3. Complete signer rotation and model revocation against the production contracts.
    These scenarios were not performed in the recorded acceptance run. See
    [E1 acceptance](e1-release.md).
 
@@ -210,8 +393,9 @@ include a 512-token generation cap shared by reasoning and final content,
 `NEAR_ENABLE_THINKING=true` and a 180-second inference timeout. The 1 October
 acceptance archive used reviewed provider policy version 5 with SHA-256
 `c9d2e1f1ea3f41099803a3d3963e4f8d4ef5616c378cf29e43aa689a6f4f6f76`.
-That reviewed provider policy and acceptance expire on **8 October 2026 at 14:29:11 UTC**;
-renewal requires a new explicit review. Rejected or unavailable evidence stops
+The current version 6 policy and its newly accepted release retain the same
+expiry, **8 October 2026 at 14:29:11 UTC**; renewal requires a new explicit
+review and acceptance. Rejected or unavailable evidence stops
 admission rather than selecting an unverified fallback.
 
 See [E1 acceptance](e1-release.md), the

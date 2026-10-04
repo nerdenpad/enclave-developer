@@ -78,6 +78,11 @@ const path = process.argv[process.argv.indexOf('--policy') + 1];
 const policy = JSON.parse(await readFile(path, 'utf8'));
 let input = ''; for await (const chunk of process.stdin) input += chunk;
 const data = JSON.parse(input);
+const report = data.attestation?.gateway_attestation ?? data.attestation;
+if (policy.mode === 'admission-fixture' && typeof report?.fixtureError === 'string') {
+  if (policy.changeOnReject) await writeFile(path, JSON.stringify({ changed: true }));
+  process.stdout.write(JSON.stringify({ok:false,error:report.fixtureError,report:'private-raw-report'})); process.exit(1);
+}
 if (policy.mode === 'reject') { process.stderr.write('private-verifier-diagnostic'); process.stdout.write('private-verifier-diagnostic'); process.exit(7); }
 if (policy.mode === 'fixed-error') { process.stderr.write('private-verifier-diagnostic'); process.stdout.write(JSON.stringify({ok:false,error:policy.errorCode,report:'private-raw-report',nonce:'private-nonce',token:'private-token'})); process.exit(policy.exitCode ?? 1); }
 if (policy.mode === 'invalid-json') { process.stdout.write('private-invalid-output'); process.exit(0); }
@@ -161,6 +166,24 @@ async function session() {
   const result = await createNearAttestationVerifier(runtime())({ baseUrl, model, signal: AbortSignal.timeout(5_000) });
   sessions.push(result);
   return result;
+}
+
+async function admissionRuntime(maxDirectAdmissionAttempts = 3, policy: Record<string, unknown> = {}) {
+  await writeFile(policyPath, JSON.stringify({ mode: "admission-fixture", ...policy }));
+  return { ...runtime(), maxDirectAdmissionAttempts, policySha256: `0x${createHash("sha256").update(await readFile(policyPath)).digest("hex")}` };
+}
+
+function rejectAdmissionReports(count: number, errorCode = "WORKLOAD_NOT_APPROVED") {
+  requestHook = (request, response) => {
+    if (!request.url?.startsWith("/v1/attestation/report")) return false;
+    const evidence = { model_name: model, request_nonce: new URL(request.url, baseUrl).searchParams.get("nonce"),
+      tls_cert_fingerprint: spki, signing_address: signingAddress,
+      ...(calls.length <= count ? { fixtureError: errorCode } : {}) };
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify(request.headers.host?.startsWith(cloudHost)
+      ? { gateway_attestation: evidence, model_attestations: [evidence] } : evidence));
+    return true;
+  };
 }
 
 describe("NEAR transport trust boundaries", () => {
@@ -380,6 +403,176 @@ describe("NEAR transport trust boundaries", () => {
     expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503,
       details: { attestationFailure: { stage: "transport", reason: "request" } } });
     expect(JSON.stringify(error)).not.toContain("private injected");
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
+});
+
+describe("bounded direct workload admission", () => {
+  it.each([0, 4, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects unsafe attempt limit %s", (maxDirectAdmissionAttempts) => {
+    expect(() => createNearAttestationVerifier({ ...runtime(), maxDirectAdmissionAttempts })).toThrow("integer from 1 to 3");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("requires a pinned policy before enabling direct selection retries", () => {
+    expect(() => createNearAttestationVerifier({ ...runtime(), maxDirectAdmissionAttempts: 2 })).toThrow("pinned policy");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("keeps the default at one rejected report", async () => {
+    await admissionRuntime();
+    rejectAdmissionReports(10);
+    await expect(createNearAttestationVerifier(runtime())({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { verifierError: "WORKLOAD_NOT_APPROVED" } } });
+    expect(calls).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects an approved second connection with a fresh nonce before one explicit POST", async () => {
+    const options = await admissionRuntime();
+    rejectAdmissionReports(1);
+    const destroy = vi.spyOn(https.Agent.prototype, "destroy");
+    const verified = await createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) });
+    sessions.push(verified);
+    expect(calls).toHaveLength(2);
+    expect(calls.every(call => call.method === "GET" && call.body === "" && call.authorization === undefined)).toBe(true);
+    expect(calls[0]!.remotePort).not.toBe(calls[1]!.remotePort);
+    const nonces = calls.map(call => new URL(call.url, baseUrl).searchParams.get("nonce"));
+    expect(nonces[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(nonces[1]).not.toBe(nonces[0]);
+    expect(JSON.parse(verified.attestationProof!).report.request_nonce).toBe(nonces[1]);
+    const selectedAgents = [...agents];
+    expect(selectedAgents).toHaveLength(2);
+    expect(destroy.mock.contexts).toContain(selectedAgents[0]);
+    expect(destroy.mock.contexts).not.toContain(selectedAgents[1]);
+    expect(vi.mocked(childProcess.spawn).mock.calls.every(call => call[1]?.includes(options.policySha256))).toBe(true);
+    await verified.fetch(new URL(`${baseUrl}/chat/completions`), { method: "POST", body: "one explicit private prompt" });
+    expect(calls.filter(call => call.method === "POST")).toHaveLength(1);
+    expect(calls[2]!.remotePort).toBe(calls[1]!.remotePort);
+    verified.close?.();
+    expect(destroy.mock.contexts).toContain(selectedAgents[1]);
+  });
+
+  it("bounds unknown workloads to three GETs and destroys every rejected agent", async () => {
+    const options = await admissionRuntime();
+    rejectAdmissionReports(10);
+    const destroy = vi.spyOn(https.Agent.prototype, "destroy");
+    const error = await createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", details: { attestationFailure: {
+      stage: "verifier", reason: "rejected", verifierError: "WORKLOAD_NOT_APPROVED" } } });
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map(call => new URL(call.url, baseUrl).searchParams.get("nonce"))).size).toBe(3);
+    expect(calls.every(call => call.method === "GET" && call.body === "")).toBe(true);
+    expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(3);
+    expect(agents.size).toBe(3);
+    for (const agent of agents) expect(destroy.mock.contexts).toContain(agent);
+    expect(JSON.stringify(error)).not.toContain("private-raw-report");
+  });
+
+  it("never redispatches a failed inference request after admission selection", async () => {
+    const options = await admissionRuntime();
+    rejectAdmissionReports(1);
+    const verified = await createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) });
+    sessions.push(verified);
+    requestHook = (request, response) => {
+      if (request.method !== "POST") return false;
+      response.statusCode = 503;
+      response.end("provider unavailable");
+      return true;
+    };
+    const response = await verified.fetch(new URL(`${baseUrl}/chat/completions`), { method: "POST", body: "one explicit request" });
+    expect(response.status).toBe(503);
+    expect(calls.filter(call => call.method === "GET")).toHaveLength(2);
+    expect(calls.filter(call => call.method === "POST")).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["CPU_TCB_REJECTED", "CPU_BINDING_MISMATCH", "NVIDIA_GPU_REJECTED", "NONCE_MISMATCH", "WORKLOAD_BINDING_MISMATCH", "POLICY_EXPIRED"])(
+    "does not retry a fatal verifier rejection %s", async (errorCode) => {
+      const options = await admissionRuntime();
+      rejectAdmissionReports(10, errorCode);
+      await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+        .rejects.toMatchObject({ details: { attestationFailure: { verifierError: errorCode } } });
+      expect(calls).toHaveLength(1);
+      expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(1);
+    });
+
+  it("does not retry report nonce or protocol failures", async () => {
+    const options = await admissionRuntime();
+    reportChanges = { request_nonce: "bad" };
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { stage: "report", reason: "nonce-binding" } } });
+    expect(calls).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
+
+  it("keeps Cloud at one attempt even when direct retries are configured", async () => {
+    const options = await admissionRuntime();
+    rejectAdmissionReports(10);
+    await expect(createNearAttestationVerifier({ ...options, apiKey: "fixture" })({ baseUrl: cloudBaseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { verifierError: "WORKLOAD_NOT_APPROVED" } } });
+    expect(calls).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops when the original caller aborts during the retry wait", async () => {
+    const options = await admissionRuntime();
+    rejectAdmissionReports(10);
+    const controller = new AbortController();
+    const realDestroy = https.Agent.prototype.destroy;
+    vi.spyOn(https.Agent.prototype, "destroy").mockImplementation(function (this: https.Agent) {
+      realDestroy.call(this);
+      setTimeout(() => controller.abort(), 20);
+    });
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: controller.signal }))
+      .rejects.toMatchObject({ details: { attestationFailure: { reason: "aborted" } } });
+    expect(calls).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(childProcess.spawn).mock.calls[0]![2]!.signal).toBe(controller.signal);
+  });
+
+  it("does not treat injected diagnostic-shaped errors as a trusted retry decision", async () => {
+    const options = await admissionRuntime();
+    vi.mocked(https.request).mockImplementationOnce(() => { throw new AppError("INFERENCE_ATTESTATION_FAILED", "private injected message", 503,
+      { attestationFailure: { stage: "verifier", reason: "rejected", verifierError: "WORKLOAD_NOT_APPROVED" } }); });
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { stage: "transport", reason: "request" } } });
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
+
+  it("does not retry TLS validation failures", async () => {
+    const options = await admissionRuntime();
+    vi.mocked(https.request).mockImplementationOnce(() => { throw Object.assign(new Error("private TLS diagnostic"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" }); });
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { stage: "transport", reason: "tls" } } });
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
+
+  it("refuses a changed policy between rejected candidates before another GET", async () => {
+    const options = await admissionRuntime(3, { changeOnReject: true });
+    rejectAdmissionReports(10);
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { stage: "policy", reason: "changed" } } });
+    expect(calls).toHaveLength(1);
+    expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a policy that disagrees with the trusted pin before opening a connection", async () => {
+    const options = await admissionRuntime();
+    await writeFile(policyPath, "{}");
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.timeout(5_000) }))
+      .rejects.toMatchObject({ details: { attestationFailure: { stage: "policy", reason: "changed" } } });
+    expect(calls).toHaveLength(0);
+    expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
+  });
+
+  it("does not open a candidate when the original deadline already expired", async () => {
+    const options = await admissionRuntime();
+    await expect(createNearAttestationVerifier(options)({ baseUrl, model, signal: AbortSignal.abort() }))
+      .rejects.toMatchObject({ details: { attestationFailure: { reason: "aborted" } } });
+    expect(calls).toHaveLength(0);
     expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled();
   });
 });

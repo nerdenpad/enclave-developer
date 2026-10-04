@@ -2,6 +2,7 @@ import { recoverMessageAddress, stringToHex, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
 import type { WalletConnection } from "./wallet-session";
+import { assertWalletLoginActive, awaitWalletLogin } from "./wallet-login-cancel";
 
 export function validateLoginMessage(message: string, address: string, origin: string, nonce?: string) {
   const data = parseSiweMessage(message), now = Date.now();
@@ -22,12 +23,31 @@ export async function signLoginMessage(message: string, address: string, request
   return signature;
 }
 
-async function authRequest(path: string, body?: unknown, token?: string) {
-  const response = await fetch(`/api/v1/auth/wallet/${path}`, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
-    headers: { "content-type": "application/json", ...(token ? { "x-api-key": token } : {}) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(path === "config" ? 5_000 : 15_000) });
-  if (!response.ok) throw Error(response.status === 429 ? "Too many login attempts. Please wait a few minutes." : "Wallet login failed or expired. Please try again.");
-  return response.json() as Promise<unknown>;
+async function authRequest(path: string, body?: unknown, token?: string, signal?: AbortSignal) {
+  assertWalletLoginActive(signal);
+  const deadline = AbortSignal.timeout(path === "config" ? 5_000 : 15_000);
+  const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  // Verification may have issued an HttpOnly cookie before cancellation. Keep
+  // reading its bounded response so the late token can be explicitly revoked.
+  // The caller's local wait still stops immediately through requestSignal.
+  const networkSignal = path === "verify" ? deadline : requestSignal;
+  const exchange = (async () => {
+    const response = await fetch(`/api/v1/auth/wallet/${path}`, { method: body === undefined ? "GET" : "POST", credentials: "same-origin",
+      headers: { "content-type": "application/json", ...(token ? { "x-api-key": token } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: networkSignal });
+    if (!response.ok) throw Error(response.status === 429 ? "Too many login attempts. Please wait a few minutes." : "Wallet login failed or expired. Please try again.");
+    return response.json() as Promise<unknown>;
+  })();
+  if (path === "verify") {
+    // A transport may complete authentication after our local attempt ended.
+    // Revoke that late token instead of installing it into a newer attempt.
+    void exchange.then(data => {
+      if (!requestSignal.aborted) return;
+      const late = z.object({ token: z.string().regex(/^enws_[a-f0-9]{64}$/) }).safeParse(data);
+      if (late.success) void logoutWallet(late.data.token).catch(() => {});
+    }).catch(() => {});
+  }
+  return awaitWalletLogin(exchange, requestSignal);
 }
 export async function walletLoginAvailable(): Promise<boolean> {
   // Retry only the read-only capability probe after a transport failure. Login
@@ -44,26 +64,30 @@ export async function walletLoginAvailable(): Promise<boolean> {
   return false;
 }
 export async function logoutWallet(token: string) { await authRequest("logout", {}, token); }
-export async function resumeWallet(wallet: WalletConnection) {
+export async function resumeWallet(wallet: WalletConnection, signal?: AbortSignal) {
+  assertWalletLoginActive(signal);
   const address = wallet.account.address;
   if (wallet.account.chainId !== 5042) return null;
-  const session = z.object({ token: z.string().regex(/^enws_[a-f0-9]{64}$/), address: z.string(), expiresAt: z.string().datetime() }).parse(await authRequest("resume", { address }));
+  const session = z.object({ token: z.string().regex(/^enws_[a-f0-9]{64}$/), address: z.string(), expiresAt: z.string().datetime() }).parse(await authRequest("resume", { address }, undefined, signal));
+  assertWalletLoginActive(signal);
   if (wallet.account.address.toLowerCase() !== address.toLowerCase() || wallet.account.chainId !== 5042
     || session.address.toLowerCase() !== address.toLowerCase() || Date.parse(session.expiresAt) <= Date.now()
     || Date.parse(session.expiresAt) > Date.now() + 1_805_000) throw Error("Wallet login expired or changed");
   return session;
 }
-export async function loginWallet(wallet: WalletConnection, stillCurrent: () => boolean) {
+export async function loginWallet(wallet: WalletConnection, stillCurrent: () => boolean, signal?: AbortSignal) {
+  assertWalletLoginActive(signal);
   const address = wallet.account.address;
   const check = () => {
+    assertWalletLoginActive(signal);
     if (!stillCurrent() || wallet.account.address.toLowerCase() !== address.toLowerCase() || wallet.account.chainId !== 5042) throw Error("Wallet changed during login. Connect to Arc and try again.");
   };
   check();
-  const c = z.object({ id: z.string().regex(/^[a-f0-9]{48}$/), message: z.string().max(2048) }).parse(await authRequest("challenge", { address }));
+  const c = z.object({ id: z.string().regex(/^[a-f0-9]{48}$/), message: z.string().max(2048) }).parse(await authRequest("challenge", { address }, undefined, signal));
   check(); validateLoginMessage(c.message, address, location.origin, c.id);
-  const signature = await wallet.signIn(c.message);
+  const signature = await awaitWalletLogin(wallet.signIn(c.message, signal), signal);
   check();
-  const result = z.object({ token: z.string().regex(/^enws_[a-f0-9]{64}$/), address: z.string(), expiresAt: z.string().datetime() }).parse(await authRequest("verify", { id: c.id, signature }));
+  const result = z.object({ token: z.string().regex(/^enws_[a-f0-9]{64}$/), address: z.string(), expiresAt: z.string().datetime() }).parse(await authRequest("verify", { id: c.id, signature }, undefined, signal));
   try {
     check();
     if (result.address.toLowerCase() !== address.toLowerCase() || Date.parse(result.expiresAt) <= Date.now() || Date.parse(result.expiresAt) > Date.now() + 1_805_000) throw Error("Invalid login session");

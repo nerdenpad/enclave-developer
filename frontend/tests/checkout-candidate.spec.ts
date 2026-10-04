@@ -19,11 +19,20 @@ const receiptTypes = { InferenceReceipt: [
   { name: "outHash", type: "bytes32" }, { name: "attRef", type: "bytes32" }, { name: "nonce", type: "bytes32" }, { name: "ts", type: "uint64" },
 ] } as const;
 
-async function fixture(page: Page, options: { rejectPayment?: boolean; lostResponse?: boolean; uncertainExecution?: boolean; historyRecord?: boolean; resumeAfterLogin?: boolean; admissionFailureOnce?: boolean } = {}) {
+async function fixture(page: Page, options: { rejectPayment?: boolean; lostResponse?: boolean; uncertainExecution?: boolean; historyRecord?: boolean; resumeAfterLogin?: boolean;
+  admissionFailureOnce?: boolean; admissionStatus?: "provider-unavailable" | "unavailable" } = {}) {
   const walletCalls: string[] = [], requests: { path: string; body: string | null; headers: Record<string, string> }[] = [];
   const loginId = "ab".repeat(24), loginToken = `enws_${"ab".repeat(32)}`;
   let loginMessage = "", settlements = 0, paidAttempts = 0, loginVerified = false;
   let admissionFailed = false;
+  let failHealth = false;
+  let delayedHealth: { wait: Promise<void>; entered: () => void } | null = null;
+  function holdNextHealth() {
+    let release!: () => void, entered!: () => void;
+    const wait = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    delayedHealth = { wait, entered }; return { release, started };
+  }
   let delayedPolicies: { wait: Promise<void>; entered: () => void } | null = null;
   function holdNextPolicies() {
     let release!: () => void, entered!: () => void;
@@ -64,7 +73,7 @@ async function fixture(page: Page, options: { rejectPayment?: boolean; lostRespo
   const health = { ok: true, service: "gateway", teeMode: "managed-near", inferenceBackend: "near-verified", inferenceRoute: "near-direct-experimental",
     chainId: 5042, paymentMode: "authorized", settlementToken: token, servingModel: { id: "fixture", name: "GLM fixture", modelHash, codeHash },
     receiptSigner: account.address, verifierAddress: meter, agentRuntimeEnabled: false, inferencePriceUsdc: 0.1,
-    deployment: { stage: "production", productionReady: true, gatewayKeyCustody: "software", inferenceTrust: "near-cpu-gpu", releaseProfile: "near-arc" },
+    deployment: { stage: "production", productionReady: true, providerAdmissionReady: true, gatewayKeyCustody: "software", inferenceTrust: "near-cpu-gpu", releaseProfile: "near-arc" },
     providerPolicy: { sha256: hash("policy"), expiresAt: "2026-10-10T00:00:00Z" } };
   const policy = { version: 2, servingImageId: "fixture", measurement: codeHash, policyHash: hash("policy"), status: "active", binding: "registry", scope: null,
     trustMode: "development-software", activatedAt: new Date().toISOString(), createdAt: new Date().toISOString() };
@@ -85,7 +94,12 @@ async function fixture(page: Page, options: { rejectPayment?: boolean; lostRespo
     const path = url.pathname.slice(4), headers = req.headers();
     requests.push({ path, body: req.postData(), headers });
     const reply = (json: unknown, status = 200) => route.fulfill({ status, json });
-    if (path === "/health") return reply(health);
+    if (path === "/health") {
+      const snapshot = structuredClone(health), held = delayedHealth; delayedHealth = null;
+      if (held) { held.entered(); await held.wait; }
+      if (failHealth) { failHealth = false; return reply({ title: "STATUS_UNAVAILABLE", status: 503 }, 503); }
+      return reply(snapshot);
+    }
     if (path === "/v1/auth/wallet/config") return reply({ enabled: true, origin: url.origin, chainId: 5042 });
     if (path === "/v1/auth/wallet/resume") return options.resumeAfterLogin && loginVerified
       ? reply({ token: loginToken, address: account.address, expiresAt: new Date(Date.now() + 1_800_000).toISOString() }) : reply({}, 401);
@@ -106,7 +120,12 @@ async function fixture(page: Page, options: { rejectPayment?: boolean; lostRespo
     if (path === "/v1/workspace") return reply(workspace);
     if (path === "/v1/session") return reply({ sessionId, expiresAt: new Date(Date.now() + 1_800_000).toISOString(), wrapKey: sessionKey.toString("base64") });
     if (path === "/v1/x402/settle") {
-      if (options.admissionFailureOnce && !admissionFailed) { admissionFailed = true; return reply({ title: "INFERENCE_ATTESTATION_FAILED", status: 503 }, 503); }
+      if (options.admissionFailureOnce && !admissionFailed) {
+        admissionFailed = true;
+        if (options.admissionStatus) { health.deployment.productionReady = false; health.deployment.providerAdmissionReady = false; }
+        if (options.admissionStatus === "unavailable") failHealth = true;
+        return reply({ title: "INFERENCE_ATTESTATION_FAILED", status: 503 }, 503);
+      }
       settlements++; return reply({ paymentId, tx: hash("settlement"), confidential: false });
     }
     if (path === "/v1/inference") {
@@ -133,7 +152,8 @@ async function fixture(page: Page, options: { rejectPayment?: boolean; lostRespo
   await page.getByRole("button", { name: "Checkout fixture" }).click();
   await page.locator("#wallet-login").click();
   await expect(page.locator("#connection-status")).toContainText("Connected");
-  return { requests, walletCalls, stored, holdNextPolicies, counts: () => ({ settlements, paidAttempts }) };
+  return { requests, walletCalls, stored, health, holdNextPolicies, holdNextHealth,
+    failNextHealth: () => { failHealth = true; }, counts: () => ({ settlements, paidAttempts }) };
 }
 
 for (const width of [1440, 390]) test(`enabled candidate requires separate login and payment approval at width ${width}`, async ({ page }) => {
@@ -185,20 +205,24 @@ test("lost wallet session preserves the original request until explicit same-wal
   expect(attempts.at(-1)?.headers["x-payment"]).toBe(paymentId);
 });
 
-test("wallet loss while login is loading retains expiry and restricted workspace actions", async ({ page }) => {
+test("wallet loss while login is loading cancels restoration without resurrecting workspace actions", async ({ page }) => {
   const f = await fixture(page, { historyRecord: true, resumeAfterLogin: true });
   await page.clock.install();
   const held = f.holdNextPolicies();
   await page.goto("/"); await page.goto("/dashboard"); await held.started;
   await page.evaluate(() => { Reflect.get(window, "fixtureDropWallet")(); });
   held.release();
-  await expect(page.locator("#connection-status")).toContainText("Connected");
-  await expect(page.locator("#wallet-login-status")).toContainText("Signed in · wallet disconnected");
+  await expect(page.locator("#connection-status")).toHaveText("Disconnected");
+  await expect(page.locator("#wallet-login-status")).toContainText("Wallet connection changed");
   await expect(page.locator("#run-inference")).toBeDisabled();
   await expect(page.locator("#new-agent")).toBeDisabled(); await expect(page.locator("#issue-view-key")).toBeDisabled();
-  await expect(page.locator("#export-receipts-csv")).toBeEnabled();
+  await expect(page.locator("#export-receipts-csv")).toBeDisabled();
+  await expect(page.locator("#receipt-rows tr")).toHaveCount(0);
   await page.clock.fastForward(1_805_000);
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
+  await expect(page.locator("#wallet-login-status")).toContainText("Wallet connection changed");
+  await expect(page.locator("#export-receipts-csv")).toBeDisabled();
+  expect(f.walletCalls.filter(method => /sign/i.test(method))).toEqual(["personal_sign"]);
   expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
 });
 
@@ -224,6 +248,98 @@ test("rejected provider admission stops settlement display and preserves exact a
   expect(f.walletCalls.filter(method => method === "eth_signTypedData_v4")).toHaveLength(1);
   const settlements = f.requests.filter(req => req.path === "/v1/x402/settle");
   expect(settlements).toHaveLength(2); expect(settlements[0]?.body).toBe(settlements[1]?.body);
+});
+
+test("workspace refresh keeps production stage while reporting the current not-ready status", async ({ page }) => {
+  const f = await fixture(page, { historyRecord: true });
+  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · PRODUCTION (REPORTED)");
+  f.health.deployment.productionReady = false;
+  await page.getByRole("tab", { name: "Receipts", exact: true }).click();
+  await page.locator("#view-receipts [data-refresh]").click();
+  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · PRODUCTION · NOT READY");
+  await expect(page.locator("#environment-description")).toContainText("Production · not ready");
+  await expect(page.locator("#metric-calls")).toHaveText("1");
+  await expect(page.locator("#receipt-rows tr")).toHaveCount(1);
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+  expect(f.walletCalls.filter(method => /sign/i.test(method))).toEqual(["personal_sign"]);
+});
+
+test("failed health refresh marks status unavailable while preserving wallet workspace and history", async ({ page }) => {
+  const f = await fixture(page, { historyRecord: true }); f.failNextHealth();
+  await page.getByRole("tab", { name: "Receipts", exact: true }).click();
+  await page.locator("#view-receipts [data-refresh]").click();
+  await expect(page.locator("#environment-badge")).toHaveText("STATUS UNAVAILABLE");
+  await expect(page.locator("#environment-description")).not.toContainText("reported ready");
+  await expect(page.locator("#wallet-login-status")).toContainText("Signed in");
+  await expect(page.locator("#metric-calls")).toHaveText("1");
+  await expect(page.locator("#receipt-rows tr")).toHaveCount(1);
+  await expect(page.locator("#export-receipts")).toBeEnabled();
+  await expect(page.locator("#run-inference")).toBeDisabled();
+  await page.locator("#view-receipts [data-refresh]").click();
+  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · PRODUCTION (REPORTED)");
+  await expect(page.locator("#run-inference")).toBeEnabled();
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+});
+
+for (const admissionStatus of ["provider-unavailable", "unavailable"] as const) test(`provider rejection refreshes ${admissionStatus} status without losing the original payment recovery`, async ({ page }) => {
+  if (admissionStatus === "provider-unavailable") await page.setViewportSize({ width: 390, height: 844 });
+  const f = await fixture(page, { admissionFailureOnce: true, admissionStatus });
+  await page.locator("#prompt").fill("Retain the signed payment when provider admission fails");
+  await page.locator("#run-inference").click(); await expect(page.locator("#payment-dialog")).toBeVisible();
+  await page.locator("#confirm-payment").click(); await expect(page.locator("#inference-recovery")).toBeVisible();
+  await expect(page.locator("#environment-badge")).toHaveText(admissionStatus === "provider-unavailable" ? "NEAR GPU · PRODUCTION · PROVIDER UNAVAILABLE" : "STATUS UNAVAILABLE");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.locator("#environment-description")).not.toContainText("reported ready");
+  await expect(page.locator("#recovery-payment")).toHaveText(`Payment ${paymentId}`);
+  await expect(page.locator("#wallet-login-status")).toContainText("Signed in");
+  await expect(page.locator("#retry-inference")).toBeEnabled();
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+  expect(f.requests.filter(req => req.path === "/v1/x402/settle")).toHaveLength(1);
+  expect(f.walletCalls.filter(method => method === "eth_signTypedData_v4")).toHaveLength(1);
+  // Only this explicit action continues; it reuses the same authorization/body.
+  await page.locator("#retry-inference").click(); await expect(page.locator("#inference-output")).toHaveText(output);
+  expect(f.counts()).toEqual({ settlements: 1, paidAttempts: 1 });
+  expect(f.walletCalls.filter(method => method === "eth_signTypedData_v4")).toHaveLength(1);
+  const settlements = f.requests.filter(req => req.path === "/v1/x402/settle");
+  expect(settlements).toHaveLength(2); expect(settlements[0]?.body).toBe(settlements[1]?.body);
+});
+
+test("a delayed old production health response cannot overwrite a newer provider rejection", async ({ page }) => {
+  const f = await fixture(page, { admissionFailureOnce: true, admissionStatus: "provider-unavailable" });
+  const held = f.holdNextHealth();
+  await page.getByRole("tab", { name: "Receipts", exact: true }).click();
+  await page.locator("#view-receipts [data-refresh]").click(); await held.started;
+  await page.getByRole("tab", { name: "Inference", exact: true }).click();
+  await page.locator("#prompt").fill("Fence an older status read without duplicating payment");
+  await page.locator("#run-inference").click(); await expect(page.locator("#payment-dialog")).toBeVisible();
+  await page.locator("#confirm-payment").click();
+  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · PRODUCTION · PROVIDER UNAVAILABLE");
+  await expect(page.locator("#inference-recovery")).toBeVisible();
+  const obsolete = page.waitForResponse(async response => new URL(response.url()).pathname === "/api/health"
+    && response.status() === 200 && (await response.json()).deployment?.productionReady === true);
+  held.release();
+  const oldResponse = await obsolete; await oldResponse.finished();
+  // The response and body have arrived. Yield browser tasks/render frames so
+  // this assertion observes the old response being processed, not the prior DOM.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.locator("#environment-badge")).toHaveText("NEAR GPU · PRODUCTION · PROVIDER UNAVAILABLE");
+  await expect(page.locator("#recovery-payment")).toHaveText(`Payment ${paymentId}`);
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+  expect(f.requests.filter(req => req.path === "/v1/x402/settle")).toHaveLength(1);
+});
+
+test("slow health reads are not starved by routine polling or allowed to retain a ready banner on failure", async ({ page }) => {
+  await page.clock.install();
+  const f = await fixture(page), held = f.holdNextHealth();
+  const before = f.requests.filter(req => req.path === "/health").length;
+  await page.getByRole("tab", { name: "Receipts", exact: true }).click();
+  await page.locator("#view-receipts [data-refresh]").click(); await held.started;
+  await page.clock.runFor(10_001);
+  expect(f.requests.filter(req => req.path === "/health")).toHaveLength(before + 1);
+  f.failNextHealth(); held.release();
+  await expect(page.locator("#environment-badge")).toHaveText("STATUS UNAVAILABLE");
+  expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });
+  expect(f.walletCalls.filter(method => /sign/i.test(method))).toEqual(["personal_sign"]);
 });
 
 test("explicit candidate recovery reuses the paid request without another signature or settlement", async ({ page }) => {

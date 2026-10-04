@@ -4,6 +4,25 @@ The `managed-near` profile uses verified NEAR inference and authorized Arc USDC 
 
 The selected route is **experimental direct NEAR**: `NEAR_ENDPOINT_PROFILE=direct-experimental` with the exact model endpoint `https://<model-label>.completions.near.ai/v1`. This route can enter the accepted production profile only after strict node verification and the release acceptance below. Selecting an endpoint does not establish readiness. The Cloud Gateway remains a separate supported route using `NEAR_ENDPOINT_PROFILE=cloud` and `https://cloud-api.near.ai/v1`; changing routes requires matching policy review and a new accepted archive.
 
+Reviewed provider policy v6 and its new accepted release were installed on
+**4 October 2026** after a real 0.10 USDC operator EOA request returned complete
+`READY` content and a verified receipt with confirmed Arc settlement/anchor.
+Archived and fresh production startup verification passed; public backend and
+provider readiness were true at 10:05 UTC. The policy hash is
+`75abdd6f7e2a075863b71afa68a7e7dddb43115f3834b6428ace33a228d89ffa`;
+its expiry remains **8 October 2026 at 14:29:11 UTC**. Physical OKX and remaining
+E1 operational acceptance stay open. See [release progress](release-progress.md).
+
+`NEAR_DIRECT_ADMISSION_ATTEMPTS` defaults to `1` and accepts integers from 1 to 3.
+The deployed value is `3`. Values above one require managed verified NEAR,
+the explicit direct profile and an exact provider-policy SHA-256 pin. Only a
+trusted verifier's `WORKLOAD_NOT_APPROVED` rejection can select another candidate
+before dispatch. Each attempt creates a new nonce and verified connection; rejected
+connections are closed and policy bytes must stay unchanged. One original abort
+deadline bounds all attempts. Cloud mode remains one attempt. TLS, CPU/GPU,
+nonce, signature and protocol failures are terminal; inference POSTs are never
+repeated by this mechanism. All candidates may still be rejected.
+
 ## Prepare acceptance
 
 GPU verification is also explicit. The default `NVIDIA_VERIFIER_MODE=nras` checks
@@ -73,6 +92,9 @@ validating the release, archived evidence, keys and chain wiring, it keeps statu
 wallet sign-in and stored history available on a known fresh provider rejection,
 while reporting not ready and rejecting new payment/inference admission. See the
 [correction record](release-progress.md#backend-readiness-correction--3-october-2026).
+That dated rejection was superseded by the separately reviewed and paid-accepted
+v6 release on 4 October; the readiness correction still applies to future known
+provider rejections.
 
 Build the frontend with the agreed public payment configuration only after acceptance. The `/status` page reports the inference route, active release profile, provider policy fingerprint and expiry, payment network and known verification boundaries. Direct mode is labeled **Experimental direct NEAR**, including after acceptance. Production readiness remains a gateway report of validated release checks; this page does not independently prove hardware, transcript or payment acceptance. Gateway key custody remains software-managed.
 

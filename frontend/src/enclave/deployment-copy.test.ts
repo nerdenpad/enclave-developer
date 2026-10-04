@@ -38,6 +38,30 @@ describe("copy derived from gateway settings and browser payment configuration",
     expect(copy.summary).toContain("Public checkout blocked");
     expect(copy.homeDetails).toContain("do not independently prove");
   });
+  it("keeps production visible when strict provider admission is unavailable", () => {
+    const h = managed(true);
+    h.deployment = { ...h.deployment!, productionReady: false, providerAdmissionReady: false };
+    const copy = deploymentCopy(h, true);
+    expect(copy.badgeStage).toBe("PRODUCTION · PROVIDER UNAVAILABLE");
+    expect(copy.stage).toBe("Production · provider unavailable");
+    expect(copy.summary).not.toMatch(/Pilot|reported ready/);
+    expect(copy.checkout).toBe("Browser Arc payments configured");
+    expect(copy.paymentDescription).toContain("explicit wallet approval");
+  });
+  it.each([true, undefined])("labels other production readiness failures without inventing provider unavailability (%s)", providerAdmissionReady => {
+    const h = managed(true);
+    h.deployment = { ...h.deployment!, productionReady: false, providerAdmissionReady };
+    const copy = deploymentCopy(h, true);
+    expect(copy.badgeStage).toBe("PRODUCTION · NOT READY");
+    expect(copy.stage).toBe("Production · not ready");
+    expect(copy.summary).not.toMatch(/Pilot|reported ready|provider unavailable/);
+  });
+  it("does not label inconsistent provider admission as ready", () => {
+    const h = managed(true);
+    h.deployment = { ...h.deployment!, providerAdmissionReady: false };
+    expect(deploymentCopy(h, true).badgeStage).toBe("PRODUCTION · PROVIDER UNAVAILABLE");
+    expect(deploymentCopy(h, true).summary).not.toContain("reported ready");
+  });
   it("only describes real Arc payments when the explicit site configuration also permits them", () => {
     const copy = deploymentCopy(managed(true), true);
     expect(copy.checkout).toBe("Browser Arc payments configured");

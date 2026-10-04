@@ -56,6 +56,7 @@ const envSchema = z.object({
   NEAR_ATTESTATION_POLICY: z.string().min(1).optional(),
   NEAR_ATTESTATION_POLICY_SHA256: z.string().regex(/^0x[0-9a-f]{64}$/).optional(),
   NEAR_ENDPOINT_PROFILE: z.enum(["cloud", "direct-experimental"]).default("cloud"),
+  NEAR_DIRECT_ADMISSION_ATTEMPTS: z.coerce.number().int().min(1).max(3).default(1),
   NEAR_MAX_TOKENS: z.coerce.number().int().positive().max(4096).default(512),
   NEAR_ENABLE_THINKING: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   AGENT_RUNTIME_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
@@ -97,6 +98,10 @@ const envSchema = z.object({
   }
   if (env.NEAR_ENDPOINT_PROFILE === "direct-experimental" && (env.TEE_MODE !== "managed-near" || env.INFERENCE_BACKEND !== "near-verified")) {
     ctx.addIssue({ code: "custom", path: ["NEAR_ENDPOINT_PROFILE"], message: "The experimental direct profile requires managed NEAR hardware verification" });
+  }
+  if (env.NEAR_DIRECT_ADMISSION_ATTEMPTS > 1 && (env.NEAR_ENDPOINT_PROFILE !== "direct-experimental"
+      || env.TEE_MODE !== "managed-near" || env.INFERENCE_BACKEND !== "near-verified" || !env.NEAR_ATTESTATION_POLICY_SHA256)) {
+    ctx.addIssue({ code: "custom", path: ["NEAR_DIRECT_ADMISSION_ATTEMPTS"], message: "Repeated direct admission requires the explicit managed direct profile and a pinned reviewed provider policy" });
   }
   if (env.ALLOW_LOCAL_BOOTSTRAP && ![31337, 1337].includes(env.ARC_CHAIN_ID)) ctx.addIssue({ code: "custom", path: ["ALLOW_LOCAL_BOOTSTRAP"], message: "Bootstrap is restricted to local chains" });
   if (env.AGENT_RUNTIME_ENABLED && env.PAYMENT_MODE === "mock" && (env.ARC_CHAIN_ID !== 31337 || !env.ALLOW_LOCAL_BOOTSTRAP)) {

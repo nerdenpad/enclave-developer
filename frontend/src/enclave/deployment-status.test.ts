@@ -36,13 +36,13 @@ describe("deployment health contract", () => {
   it("accepts managed pilot and complete reported production status", () => {
     expect(HealthSchema.safeParse({ ...production, deployment: { ...production.deployment, stage: "pilot", productionReady: false } }).success).toBe(true);
     expect(HealthSchema.safeParse(production).success).toBe(true);
+    expect(HealthSchema.safeParse({ ...production, deployment: { ...production.deployment, productionReady: false, providerAdmissionReady: false } }).success).toBe(true);
   });
   it.each(["near-direct-experimental", "near-cloud-gateway"])("accepts reported verified route %s without requiring it in legacy health", inferenceRoute => {
     expect(HealthSchema.safeParse({ ...production, inferenceRoute }).success).toBe(true);
   });
   it.each([
     { label: "pilot ready claim", patch: { deployment: { ...production.deployment, stage: "pilot" } } },
-    { label: "production not ready", patch: { deployment: { ...production.deployment, productionReady: false } } },
     { label: "missing release profile", patch: { deployment: { ...production.deployment, releaseProfile: undefined } } },
     { label: "development release profile", patch: { deployment: { ...production.deployment, releaseProfile: "development" } } },
     { label: "missing CPU/GPU trust", patch: { deployment: { ...production.deployment, inferenceTrust: undefined } } },
@@ -93,6 +93,26 @@ describe("reported deployment status", () => {
     expect(html).toContain("A receipt signature does not by itself prove hardware attestation");
     expect(html).not.toContain("This is a pilot deployment");
     expect(html).not.toContain("No live or production status has been established");
+  });
+  it("keeps production stage and explains the current provider admission failure", () => {
+    const html = render({ ...production, deployment: { ...production.deployment!, productionReady: false, providerAdmissionReady: false } }, true);
+    expect(html).toContain('class="deployment-badge">PRODUCTION · PROVIDER UNAVAILABLE');
+    expect(html).toContain("This deployment remains production");
+    expect(html).toContain("new provider inference and settlement require a passing strict CPU/GPU verification check");
+    expect(html).toContain("Reported not ready");
+    expect(html).toContain("Provider admission");
+    expect(html).toContain("Unavailable · strict provider verification has not passed");
+    expect(html).not.toContain("PRODUCTION · REPORTED READY");
+    expect(html).not.toContain("This is a pilot deployment");
+    expect(html).not.toContain("Release acceptance is still required");
+  });
+  it.each([true, undefined])("labels another production readiness failure without guessing its cause (%s)", providerAdmissionReady => {
+    const html = render({ ...production, deployment: { ...production.deployment!, productionReady: false, providerAdmissionReady } });
+    expect(html).toContain('class="deployment-badge">PRODUCTION · NOT READY');
+    expect(html).toContain("Check current gateway and provider status before sending a request");
+    expect(html).not.toContain("PRODUCTION · REPORTED READY");
+    expect(html).not.toContain("This is a pilot deployment");
+    expect(html).not.toContain("Release acceptance is still required");
   });
   it("does not infer a release stage from legacy health or paid settlement from mock mode", () => {
     const html = render(development, true);

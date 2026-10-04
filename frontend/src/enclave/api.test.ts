@@ -71,6 +71,39 @@ function scenario(options: { health?: Partial<Health>; challenge?: unknown; resp
 }
 afterEach(() => vi.useRealTimers());
 
+describe("production deployment health without provider admission", () => {
+  const productionHealth: Health = { ...health, teeMode: "managed-near", inferenceBackend: "near-verified", inferenceRoute: "near-direct-experimental",
+    chainId: 5042, paymentMode: "authorized", settlementToken: arc.usdc.address as Hex,
+    providerPolicy: { sha256: h("f"), expiresAt: "2026-10-08T14:29:11Z" },
+    deployment: { stage: "production", productionReady: false, providerAdmissionReady: false,
+      gatewayKeyCustody: "software", inferenceTrust: "near-cpu-gpu", releaseProfile: "near-arc" } };
+
+  it("loads the stable production mode and separate denied admission without signing or submitting anything", async () => {
+    const state = scenario({ health: productionHealth });
+    const result = await state.client.health();
+    expect(result.deployment).toMatchObject({ stage: "production", productionReady: false, providerAdmissionReady: false });
+    expect(state.fetcher).toHaveBeenCalledOnce();
+    expect(String(state.fetcher.mock.calls[0]?.[0])).toMatch(/\/health$/);
+    expect(state.counts()).toEqual({ paidAttempts: 0, settlementCount: 0 });
+  });
+
+  it("rejects ready status when provider admission is explicitly denied", async () => {
+    const state = scenario({ health: { ...productionHealth, deployment: { ...productionHealth.deployment!, productionReady: true } } });
+    await expect(state.client.health()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(state.counts()).toEqual({ paidAttempts: 0, settlementCount: 0 });
+  });
+
+  for (const invalid of [{ inferenceBackend: "echo" }, { teeMode: "dev" }, { chainId: 31337 }, { paymentMode: "mock" as const },
+    { providerPolicy: undefined }, { deployment: { ...productionHealth.deployment!, inferenceTrust: "development" as const } }]) {
+    it(`does not let not-ready production status bypass the managed release profile: ${Object.keys(invalid).join(",")}`, async () => {
+      const state = scenario({ health: { ...productionHealth, ...invalid } });
+      await expect(state.client.health()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+      expect(state.fetcher).toHaveBeenCalledOnce();
+      expect(state.counts()).toEqual({ paidAttempts: 0, settlementCount: 0 });
+    });
+  }
+});
+
 describe("explicit Arc wallet settlement", () => {
   const policy = { meter: `0x${"33".repeat(20)}`, verifier: health.verifierAddress, receiptSigner: account.address, maxAmountUnits: "1000" };
   function arcScenario(extra: { failSettle?: boolean; failPaid?: boolean } = {}) {

@@ -1,6 +1,6 @@
 # Wallet connections and real USDC
 
-The final domain is **enclaveagent.tech**. The selected payment network is **Arc Mainnet (5042)**. The backend runs in production mode with a historically accepted NEAR + Arc release manifest. New payment/inference admission is blocked pending strict review and fresh acceptance of the current provider workload. Wallet connection is implemented separately from payments. Public checkout is enabled at the approved **0.10 USDC per request**. A real operator WalletConnect browser session passed wallet sign-in, navigation/reload, one payment, one inference, receipt export and independent Arc verification on 1 October. Web QA fixes were deployed on **3 October 2026**. Manual wallet acceptance is reopened after a detailed OKX failure report; a real OKX retest is still pending. Live settlement interruption, signer rotation and model revocation acceptance remain open, so E1 public launch remains open. See the [Arc deployment profile](arc-deployment.md) and [release progress](release-progress.md).
+The final domain is **enclaveagent.tech**. The payment network is **Arc Mainnet (5042)** and the approved price is **0.10 USDC per request**. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. An operator EOA request passed payment, complete model response, receipt and confirmed anchor on 4 October 2026, with readiness reported that morning. The later physical OKX retest stopped on `WORKLOAD_NOT_APPROVED` before settlement; backend readiness subsequently reported false. The earlier WalletConnect operator browser journey passed on 1 October. Wallet connection remains separate from sign-in and payment. Physical OKX paid acceptance, live settlement interruption, signer rotation and model revocation acceptance remain open. See [release progress](release-progress.md) for dated evidence and the [Arc deployment profile](arc-deployment.md) for configuration.
 
 ## Implemented connection
 
@@ -22,6 +22,22 @@ The backend verifies the signature against its stored message and atomically con
 
 Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions can inspect their own workspace and use the configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. Login itself is not a payment or hardware proof.
 
+### Sign-in recovery — 4 October 2026
+
+The deployed frontend now cancels pending login on disconnect, session expiry,
+account/network change and navigation. Sign-in has a 60-second limit; a stalled
+attempt shows a recovery message and releases the button. A late signature cannot
+complete a cancelled login or unlock a newer attempt. If server verification
+returns after cancellation, its issued session is revoked.
+
+The isolated release passed TypeScript, 91 wallet unit tests and three browser
+regressions. The same three scenarios also passed against the deployed Node
+website with synthetic wallets and intercepted APIs: reconnect after a hung
+signature, retry after timeout, and expiry/recovery in a long-open tab. These
+checks submitted no real payment and do not replace a physical OKX retest.
+Tabs opened before this deployment need one reload to load the new JavaScript;
+subsequent disconnect/reconnect recovery does not require reloading.
+
 Published and checked on 25 September 2026 at `enclaveagent.tech`: an unfunded browser wallet fixture signed in, loaded its empty workspace, could not submit a pilot settlement, and lost access after an account change. The PostgreSQL integration covered concurrent replay, stable ownership across logins, separate identities, expiry and revocation. The hosted WalletConnect check still returned 77 catalog entries and a working QR relay. These historical checks did not exercise an actual wallet-app payment.
 
 On 1 October 2026, the browser completed actual WalletConnect pairing and SIWE
@@ -37,8 +53,8 @@ physical wallet-app UI.
 The project owner confirmed manual wallet acceptance on **3 October 2026**.
 Acceptance was subsequently reopened following the detailed OKX failure report
 for **2 October 2026, 22:16–22:24 Moscow time**. Corrective web fixes were deployed
-on **3 October 2026**. A real OKX retest is pending current provider admission
-acceptance; the earlier confirmation remains in the
+on **3 October 2026**. Provider v6 paid acceptance completed on 4 October, but a
+physical OKX retest is still pending; the earlier confirmation remains in the
 [acceptance history](release-progress.md#manual-wallet-regression--3-october-2026).
 The 3 October canonical Arc readback found the reported payment's exact intent
 unsettled in UsageMeter at block **24086493** with **12 successor blocks**.
@@ -47,16 +63,34 @@ its payment ID and scope are retained in that acceptance history.
 Interruption during live settlement and recovery, signer rotation and model
 revocation remain separate open acceptance scenarios.
 
-Across the API and browser acceptance runs, confirmed usage is **three calls and
-0.30 USDC**, each with its own intent and one settlement. The third API request
+Across the API and browser acceptance runs, confirmed usage is **four calls and
+0.40 USDC**, each with its own intent and one settlement. The third API request
 returned complete final content `READY` with `finish_reason: stop` under reviewed
 provider policy version 5, thinking enabled and a 512-token cap. The earlier
 32-token protocol tests could truncate reasoning and do not establish complete
-final-answer quality.
+final-answer quality. The fourth operator EOA request on 4 October returned
+`READY`/`stop` under reviewed provider policy v6. Its exact completed result was
+replayed after the production API restart without additional spend or usage.
+This operator check does not establish physical OKX wallet-app compatibility.
 
 Run the additive database migration before setting `WALLET_AUTH_ORIGIN=https://enclaveagent.tech` on the API. Without this setting, public login is disabled. Login requests require the matching Origin header and have a 4 KB body limit, a 120-request/minute per-process ceiling, five outstanding challenges per address and ten active sessions per address. Multi-replica or high-volume deployments need a shared perimeter rate limiter. Test PostgreSQL behavior with `node --env-file=.env.demo --import tsx scripts/test-wallet-login.ts` from `_backend`; it creates and removes only a random test schema.
 
 ## Payment release configuration
+
+The 4 October dashboard update refreshes readiness after strict provider
+rejection and during workspace refresh. Failed health reads show **Status
+unavailable**, rather than retaining a ready banner. Existing wallet login,
+history and payment recovery remain available; no refresh resends an authorization
+or inference. This UI check used intercepted APIs and does not close physical
+OKX paid acceptance. See [the dated rollout](release-progress.md#dashboard-readiness-refresh--4-october-2026).
+
+Deployment mode is now independent of readiness. Provider rejection keeps the
+production stage and displays **PRODUCTION · PROVIDER UNAVAILABLE**; strict
+payment and inference gates remain in place. An unavailable status preserves
+the original operation for explicit recovery and never retries a payment.
+Public health reported production/ready at **18:24:32 UTC on 4 October 2026**
+after the reporting-only API restart. This dated check sent no payment and does
+not establish physical OKX acceptance. See [stable production mode](release-progress.md#stable-production-mode--4-october-2026).
 
 An explicit build-time flag and reviewed UsageMeter, verifier, receipt-signer addresses and maximum payment amount are required. See `frontend/.env.example`. Missing or invalid configuration disables checkout; changing a flag alone does not supply authentication or deploy contracts.
 

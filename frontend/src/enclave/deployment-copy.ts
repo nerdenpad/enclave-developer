@@ -5,10 +5,15 @@ export function deploymentCopy(health: Health | null, arcPaymentsConfigured: boo
   if (!health) return { badgeStage: "STATUS UNAVAILABLE", stage: "Deployment status unavailable", network: "Network not reported",
     summary: "Deployment status unavailable · Public checkout blocked", homeDetails: "Deployment status is unavailable. Public checkout is blocked until this site's payment configuration is reviewed.",
     paymentDescription: "Deployment status is unavailable. Public checkout is blocked.", checkout: "Public checkout blocked", settling: "Settling payment" };
-  const stage = health.deployment?.productionReady ? "Production · reported ready"
+  const production = health.deployment?.stage === "production";
+  const providerUnavailable = production && health.deployment?.providerAdmissionReady === false;
+  const reportedReady = production && health.deployment?.productionReady === true && !providerUnavailable;
+  const stage = production ? reportedReady ? "Production · reported ready"
+    : providerUnavailable ? "Production · provider unavailable" : "Production · not ready"
     : health.deployment?.stage === "pilot" ? "Pilot · production not ready"
       : health.deployment?.stage === "development" ? "Development · production not ready" : "Release status not reported";
-  const badgeStage = health.deployment?.productionReady ? "PRODUCTION (REPORTED)"
+  const badgeStage = production ? reportedReady ? "PRODUCTION (REPORTED)"
+    : providerUnavailable ? "PRODUCTION · PROVIDER UNAVAILABLE" : "PRODUCTION · NOT READY"
     : health.deployment?.stage?.toUpperCase() ?? "RELEASE NOT REPORTED";
   const network = health.chainId === 5042 ? "Arc (chain 5042)"
     : [31337, 1337].includes(health.chainId) ? `Local EVM (chain ${health.chainId})` : `EVM chain ${health.chainId}`;

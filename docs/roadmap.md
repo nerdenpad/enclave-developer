@@ -1,18 +1,18 @@
 # Roadmap
 
-Status reviewed on 3 October 2026. The backend runs in production mode with a historically accepted NEAR + Arc release manifest. New payment/inference admission is currently blocked pending strict review and fresh acceptance of the current provider workload. Web QA fixes were deployed on 3 October; manual OKX retest remains pending. Milestones describe delivery and acceptance evidence, not estimated launch dates.
+Status reviewed on 4 October 2026. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. A fresh operator EOA call passed complete response, 0.10 USDC settlement, receipt and confirmed anchor; public backend and provider readiness were true at 10:05 UTC. Web QA fixes were deployed on 3 October; a physical OKX retest and E1 operational acceptance remain open. Milestones describe delivery and acceptance evidence, not estimated launch dates.
 
 | Milestone | Status | Completion evidence |
 | --- | --- | --- |
 | Connected frontend and backend | Implemented | Real hosted inference, signed receipts, Arc anchoring and persistent owner history |
-| Hosted production deployment | Installed; admission blocked | HTTPS website/API, historical accepted release manifest and strict startup checks; approved price 0.10 USDC per request; current workload review remains open |
+| Hosted production deployment | Backend ready on 4 October | Accepted manifest/policy v6, archived and fresh startup checks, public HTTPS readiness at 10:05 UTC; approved price 0.10 USDC per request |
 | Receipt verification | Implemented | Public `/verify` page, local signature checks and optional contract/policy/anchor checks |
 | Deployment transparency | Implemented | Public `/status` page with configured network, model, policy and limits |
-| Hosted inference acceptance | Historical pass; current review open | Strict CPU/GPU, reviewed workload, TLS and provider signature checks passed on 1 October; third paid request returned complete final content; current provider admission is blocked |
-| Public-chain settlement | Configured; new admission blocked | Arc `5042`, real USDC, three historical accepted calls totalling 0.30 USDC; confirmed settlements and receipt anchors |
+| Hosted inference acceptance | Passed under policy v6 on 4 October | Fresh CPU/GPU, exact reviewed workload, TLS and provider signature checks; complete `READY` response; bounded attestation-only candidate admission |
+| Public-chain settlement | Accepted | Arc `5042`, real USDC, four accepted calls totalling 0.40 USDC; confirmed settlements and receipt anchors |
 | Wallet connections | Retest pending | WalletConnect operator protocol/browser journey passed on 1 October; web fixes deployed on 3 October; manual acceptance reopened after an OKX failure report; earlier 3 October owner confirmation retained in [release progress](release-progress.md#manual-wallet-regression--3-october-2026) |
 | Production user access | Implemented | Wallet sign-in, scoped sessions, owner history and authenticated receipt export |
-| E1 operational acceptance | Open | Current provider workload review and fresh acceptance, real manual OKX retest, live settlement interruption/recovery, signer rotation and model revocation; see [E1 acceptance](e1-release.md) |
+| E1 operational acceptance | Open | Real manual OKX retest, live settlement interruption/recovery, signer rotation and model revocation; see [E1 acceptance](e1-release.md) |
 
 ## Released product features
 

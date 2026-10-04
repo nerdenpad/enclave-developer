@@ -8,9 +8,9 @@ The root [README](../../README.md) is the public entry point. Detailed setup sta
 
 About description:
 
-> NEAR + Arc inference with signed receipts. Production deployment installed; new admissions blocked pending workload review. Approved tariff: 0.10 USDC/request.
+> NEAR + Arc inference with signed receipts. Provider v6 and paid backend acceptance passed on 4 October 2026. Approved tariff: 0.10 USDC/request; E1 wallet and operational acceptance remain open.
 
-Web QA fixes were deployed on 3 October 2026. Manual wallet acceptance is reopened after an OKX regression report; a real retest is still pending. The earlier owner confirmation on 3 October 2026 is retained in [release progress](../release-progress.md#manual-wallet-regression--3-october-2026). Current provider admission review, live settlement interruption, signer rotation and model revocation acceptance remain open. Keep this distinction in the public release status.
+Reviewed provider policy v6, one fresh paid EOA request, complete response, receipt and confirmed Arc anchor passed on 4 October 2026. Its accepted manifest is installed; public backend/provider readiness were true at 10:05 UTC. Web QA fixes were deployed on 3 October. A physical OKX retest, live settlement interruption, signer rotation and model revocation acceptance remain open. The earlier owner confirmation and regression are retained in [release progress](../release-progress.md#manual-wallet-regression--3-october-2026). Keep this distinction in the public release status.
 
 Website: https://enclaveagent.tech
 

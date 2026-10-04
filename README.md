@@ -14,11 +14,12 @@ verification and payment status are checked separately on the
 
 > ### Release status
 >
-> The backend runs in production mode with a historically accepted NEAR + Arc
-> release manifest. New payment/inference admission is blocked pending review
-> of the current provider workload. The approved price is **0.10 USDC per request**.
-> Web QA fixes were deployed on 3 October 2026. Manual wallet acceptance is
-> reopened; a real OKX retest and the remaining E1 acceptance are still open.
+> On **4 October 2026**, reviewed provider policy v6 passed a real **0.10 USDC**
+> request, complete model answer, signed receipt and confirmed Arc anchor.
+> The accepted release is installed; at 10:05 UTC the production API reported
+> provider admission and backend readiness as ready. Every request still requires
+> fresh verification. The approved price is **0.10 USDC per request**.
+> A real OKX retest and the remaining E1 operational acceptance are still open.
 > See [deployment status](https://enclaveagent.tech/status),
 > [acceptance evidence](docs/release-progress.md) and
 > [remaining E1 checks](docs/e1-release.md).

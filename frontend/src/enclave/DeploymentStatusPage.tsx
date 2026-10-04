@@ -3,6 +3,7 @@ import { EnclaveClient, type Health, type Policies, type ArcReceiptCount } from 
 import { VerificationHeader } from "./VerifyReceiptPage";
 import { releaseUpdates } from "./release-updates";
 import { configuredArcPaymentPolicy } from "./arc-payment";
+import { deploymentCopy } from "./deployment-copy";
 
 interface DeploymentSnapshot { health: Health; policies: Policies; at: string }
 
@@ -33,16 +34,19 @@ export function DeploymentStatusContent({ snapshot, error, receiptCount, arcPaym
 }) {
   const health = snapshot?.health, policy = snapshot?.policies.active;
   const deployment = health?.deployment;
+  const providerUnavailable = deployment?.providerAdmissionReady === false;
+  const reportedReady = deployment?.productionReady === true && !providerUnavailable;
   const arcPaymentsEnabled = arcPaymentsConfigured && health?.chainId === 5042 && health.paymentMode === "authorized";
   const badge = !snapshot ? error ? "STATUS UNAVAILABLE" : "CHECKING GATEWAY"
-    : deployment?.productionReady ? "PRODUCTION · REPORTED READY"
+    : deployment?.stage === "production" ? reportedReady ? "PRODUCTION · REPORTED READY" : deploymentCopy(health ?? null, arcPaymentsConfigured).badgeStage
     : deployment?.stage === "pilot" ? "PILOT · PRODUCTION NOT READY"
     : deployment?.stage === "development" ? "DEVELOPMENT · PRODUCTION NOT READY"
     : "RELEASE STATUS NOT REPORTED";
   const fields = health && policy ? {
     "Checked at": snapshot!.at,
     "Release stage": deployment?.stage ?? "Not reported",
-    "Production readiness": deployment ? deployment.productionReady ? "Reported ready" : "Reported not ready" : "Not reported",
+    "Production readiness": deployment ? reportedReady ? "Reported ready" : "Reported not ready" : "Not reported",
+    "Provider admission": deployment?.providerAdmissionReady === true ? "Reported available" : providerUnavailable ? "Unavailable · strict provider verification has not passed" : "Not reported",
     "Release profile": deployment?.releaseProfile ?? "Not reported",
     "Network": health.chainId === 31337 ? "Local Anvil · chain 31337 · test funds" : health.chainId === 5042 ? "Arc · chain 5042" : `Chain ${health.chainId} · network classification not independently verified`,
     "Model": health.servingModel.name, "Model hash": health.servingModel.modelHash, "Serving code hash": health.servingModel.codeHash,
@@ -73,7 +77,8 @@ export function DeploymentStatusContent({ snapshot, error, receiptCount, arcPaym
       {!health ? <li>Refresh once the gateway is available to read its deployment settings.</li>
         : !deployment ? <li>The gateway does not report a release stage or production readiness.</li>
         : deployment.stage === "pilot" ? <li>This is a pilot deployment. The gateway does not report production readiness.</li>
-        : !deployment.productionReady ? <li>This deployment does not report production readiness. Release acceptance is still required.</li>
+        : deployment.stage === "production" && providerUnavailable ? <li>This deployment remains production. Current provider admission is unavailable; new provider inference and settlement require a passing strict CPU/GPU verification check.</li>
+        : !reportedReady ? <li>This deployment reports not ready. Check current gateway and provider status before sending a request.</li>
         : <li>The gateway reports that its production release checks passed. This page does not independently verify the accepted release or current deployment.</li>}
       <li>Gateway sessions provide software admission. Gateway key custody is software-managed; release readiness does not imply hardware custody of local keys.</li>
       {health?.inferenceBackend === "near-verified" && <li>The gateway checks remote CPU and GPU evidence against its provider policy before provider requests. That policy is separate from the gateway session policy.</li>}

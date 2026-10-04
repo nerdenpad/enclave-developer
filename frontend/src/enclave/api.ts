@@ -20,7 +20,7 @@ export const HealthSchema = z.object({
   receiptSigner: address, verifierAddress: address, agentRuntimeEnabled: z.boolean(),
   inferencePriceUsdc: z.number().finite().nonnegative(),
   deployment: z.object({
-    stage: z.enum(["development", "pilot", "production"]), productionReady: z.boolean(), gatewayKeyCustody: z.literal("software"),
+    stage: z.enum(["development", "pilot", "production"]), productionReady: z.boolean(), providerAdmissionReady: z.boolean().optional(), gatewayKeyCustody: z.literal("software"),
     inferenceTrust: z.enum(["development", "near-cpu-gpu"]).optional(), releaseProfile: z.enum(["development", "near-arc"]).optional(),
   }).optional(),
   providerPolicy: z.object({ sha256: z.string().regex(/^0x[0-9a-f]{64}$/), expiresAt: date }).optional(),
@@ -29,7 +29,7 @@ export const HealthSchema = z.object({
 }).superRefine((health, context) => {
   const deployment = health.deployment;
   if (deployment?.stage !== "production" && !deployment?.productionReady) return;
-  if (deployment?.stage !== "production" || !deployment.productionReady || deployment.releaseProfile !== "near-arc"
+  if (deployment?.stage !== "production" || (deployment.productionReady && deployment.providerAdmissionReady === false) || deployment.releaseProfile !== "near-arc"
     || deployment.inferenceTrust !== "near-cpu-gpu" || health.teeMode !== "managed-near" || health.inferenceBackend !== "near-verified"
     || health.chainId !== 5042 || health.paymentMode !== "authorized" || !health.providerPolicy || health.inferenceRoute === "development") {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["deployment"], message: "Production status requires the managed NEAR and Arc release profile" });

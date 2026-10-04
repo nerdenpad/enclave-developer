@@ -15,6 +15,7 @@ describe("loadConfig", () => {
     expect(cfg.API_PORT).toBe(8787);
     expect(cfg.TEE_MODE).toBe("dev");
     expect(cfg.NEAR_ENDPOINT_PROFILE).toBe("cloud");
+    expect(cfg.NEAR_DIRECT_ADMISSION_ATTEMPTS).toBe(1);
     expect(cfg.NEAR_ENABLE_THINKING).toBe(false);
     expect(cfg.INFERENCE_ALLOW_REMOTE).toBe(false);
     expect(cfg.INFERENCE_API_KEY).toBeUndefined();
@@ -124,6 +125,15 @@ describe("verified NEAR configuration", () => {
   const configured = { DATABASE_URL: "postgres://unit.invalid/db", NODE_ENV: "test", INFERENCE_BACKEND: "near-verified",
     INFERENCE_BASE_URL: "https://test.completions.near.ai/v1", INFERENCE_MODEL: "Qwen/Test", INFERENCE_API_KEY: "unit-near-secret",
     INFERENCE_ALLOW_REMOTE: "true", NEAR_VERIFIER_PYTHON: "python", NEAR_ATTESTATION_POLICY: "/fixture/policy.json" };
+
+  it("allows bounded admission attempts only with the pinned managed direct profile", () => {
+    const retryConfig = { ...configured, TEE_MODE: "managed-near", NEAR_ENDPOINT_PROFILE: "direct-experimental", NEAR_ATTESTATION_POLICY_SHA256: `0x${"ab".repeat(32)}`, NEAR_DIRECT_ADMISSION_ATTEMPTS: "3" };
+    expect(loadConfig(retryConfig).NEAR_DIRECT_ADMISSION_ATTEMPTS).toBe(3);
+    for (const change of [{ NEAR_DIRECT_ADMISSION_ATTEMPTS: "4" }, { NEAR_DIRECT_ADMISSION_ATTEMPTS: "0" }, { NEAR_DIRECT_ADMISSION_ATTEMPTS: "1.5" },
+      { NEAR_ATTESTATION_POLICY_SHA256: undefined }, { TEE_MODE: "dev" }, { NEAR_ENDPOINT_PROFILE: "cloud", INFERENCE_BASE_URL: "https://cloud-api.near.ai/v1" }]) {
+      expect(() => loadConfig({ ...retryConfig, ...change })).toThrow("NEAR_DIRECT_ADMISSION_ATTEMPTS");
+    }
+  });
 
   it("accepts an explicit direct provider with a verifier policy and conservative token default", () => {
     expect(loadConfig(configured)).toMatchObject({ INFERENCE_BACKEND: "near-verified", TEE_MODE: "dev", NEAR_MAX_TOKENS: 512,

@@ -44,7 +44,8 @@ export function mountDashboard(): () => void {
   let walletAddress: string | null = null;
   let loginGeneration = 0;
   let loginExpiry: ReturnType<typeof setTimeout> | undefined;
-  let signingIn = false;
+  type LoginAttempt = { controller: AbortController; timer?: ReturnType<typeof setTimeout> };
+  let activeLogin: LoginAttempt | null = null;
   let health: Health | null = null;
   let workspace: Workspace | null = null;
   let models: Model[] = [];
@@ -59,11 +60,41 @@ export function mountDashboard(): () => void {
   let paginationBusy = false;
   let historyVersion = 0;
   let refreshRequest = 0;
+  let healthRequest = 0;
   let pageRequest = 0;
   let receiptVerification = 0;
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let connectionVersion = 0;
   const options = { signal: life.signal };
+  function finishLogin(attempt: LoginAttempt) {
+    clearTimeout(attempt.timer);
+    if (activeLogin !== attempt) return;
+    activeLogin = null;
+    if (!life.signal.aborted) $<HTMLButtonElement>("#wallet-login").disabled = false;
+  }
+  function cancelLogin(reason = new DOMException("Sign-in cancelled", "AbortError")) {
+    const attempt = activeLogin;
+    if (!attempt) return;
+    // Release this attempt before aborting: transport callbacks may replace the
+    // wallet synchronously, and an old finally must never unlock a new attempt.
+    finishLogin(attempt);
+    attempt.controller.abort(reason);
+  }
+  function beginLogin(): LoginAttempt {
+    const attempt: LoginAttempt = { controller: new AbortController() };
+    activeLogin = attempt;
+    $<HTMLButtonElement>("#wallet-login").disabled = true;
+    attempt.timer = setTimeout(() => {
+      if (activeLogin !== attempt || life.signal.aborted) return;
+      cancelLogin(new DOMException("Sign-in timed out", "TimeoutError"));
+      clearWorkspace();
+      text("#connection-error", "No sign-in response was received. Open your wallet and try again. If no request appears, reconnect your wallet.");
+      text("#wallet-login-status", "Sign-in timed out. Reconnect your wallet, then sign in again.");
+    }, 60_000);
+    return attempt;
+  }
+  life.signal.addEventListener("abort", () => cancelLogin(), { once: true });
+
 
   function notify(value: string) {
     clearTimeout(toastTimer); text("#toast", value); $("#toast").hidden = false;
@@ -84,7 +115,7 @@ export function mountDashboard(): () => void {
     busy = value;
     $$<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("#inference-form input,#inference-form select,#inference-form textarea,#inference-form button").forEach((control) => { control.disabled = value || Boolean(recovery); });
     select("#model-select").disabled = true;
-    $<HTMLButtonElement>("#run-inference").disabled = value || !client || Boolean(recovery) || !workspaceWalletReady();
+    $<HTMLButtonElement>("#run-inference").disabled = value || !client || !health || Boolean(recovery) || !workspaceWalletReady();
     text("#run-inference span", value ? "Request in progress…" : "Run inference");
     $<HTMLButtonElement>("#disconnect-gateway").disabled = value;
     $<HTMLButtonElement>("#retry-inference").disabled = value || Boolean(recovery?.quarantined) || !workspaceWalletReady();
@@ -122,7 +153,22 @@ export function mountDashboard(): () => void {
     if (state === "complete") { step(3, "done", "Verified"); text("#output-status", "Response verified"); }
   }
   function renderHealth() {
-    if (!health) return;
+    if (!health) {
+      if (!client) return;
+      const copy = deploymentCopy(null, configuredArcPaymentPolicy() !== null);
+      text("#environment-badge", copy.badgeStage);
+      text("#environment-description", "Gateway status could not be refreshed. Workspace history and any existing payment request are retained. Refresh to check the current deployment status.");
+      text("#connection-status", `Connected · ${client.baseUrl} · status unavailable`);
+      text("#connection-note", "Workspace connected. Current gateway readiness is unavailable.");
+      text("#request-environment", "STATUS UNAVAILABLE");
+      text("#request-note", "Gateway status is unavailable. Refresh before starting a new request. Any existing request and payment remain available in recovery.");
+      text("#metric-environment", copy.stage);
+      text("#topology-status", "STATUS UNAVAILABLE");
+      text("#provider-trust-note", "Current provider status unavailable");
+      text("#payment-network", copy.network);
+      text("#payment-description", copy.paymentDescription);
+      return;
+    }
     const near = health.inferenceBackend === "near-verified";
     const echo = health.inferenceBackend === "echo";
     const copy = deploymentCopy(health, configuredArcPaymentPolicy() !== null);
@@ -186,8 +232,25 @@ export function mountDashboard(): () => void {
       if (updated) { receipt = updated; renderReceiptDetail(); }
     }
   }
-  async function refresh(quiet = false) {
-    const active = client; if (!active || (quiet && (polling || historyExpanded || paginationBusy))) return;
+  async function refreshHealth(active: EnclaveClient, invalidate = false) {
+    const operation = ++healthRequest, version = connectionVersion;
+    const current = () => client === active && !life.signal.aborted && version === connectionVersion && operation === healthRequest;
+    if (invalidate && current()) { health = null; renderHealth(); setBusy(busy); }
+    try {
+      const next = await active.health(options);
+      if (!current()) return;
+      health = next; renderHealth(); setBusy(busy);
+    } catch {
+      if (!current()) return;
+      health = null; renderHealth(); setBusy(busy);
+    }
+  }
+  async function refresh(quiet = false, providerRejected = false) {
+    const active = client; if (!active || quiet && polling && !providerRejected) return;
+    // Health is independent of history pagination and any older refresh. A
+    // provider rejection also fences a ready response already in flight.
+    const healthRefresh = refreshHealth(active, providerRejected);
+    if (quiet && (polling || historyExpanded || paginationBusy)) { await healthRefresh; return; }
     const generation = ++historyVersion, operation = ++refreshRequest;
     const resetsHistory = historyExpanded || paginationBusy;
     polling = true;
@@ -201,7 +264,7 @@ export function mountDashboard(): () => void {
         text("#workspace-updated", "Refresh failed · displayed history may be out of date");
         if (!quiet) notify(message(error));
       }
-    } finally { if (operation === refreshRequest) polling = false; }
+    } finally { await healthRefresh; if (operation === refreshRequest) polling = false; }
   }
   function renderReceiptDetail() {
     if (!receipt) return;
@@ -229,10 +292,11 @@ export function mountDashboard(): () => void {
     notify("Response decrypted. Input, output and receipt signature verified.");
   }
   function clearWorkspace() {
+    cancelLogin();
     loginGeneration++; clearTimeout(loginExpiry);
     if (walletToken) { void logoutWallet(walletToken).catch(() => {}); walletToken = null; }
     walletAddress = null;
-    connectionVersion++; historyVersion++; refreshRequest++; pageRequest++; receiptVerification++;
+    connectionVersion++; historyVersion++; refreshRequest++; healthRequest++; pageRequest++; receiptVerification++;
     polling = false; paginationBusy = false; historyExpanded = false;
     client?.disconnect(); client = null; health = null; workspace = null; models = []; policies = null; pending = null; recovery = null; receipt = null;
     lastResult?.outputBytes.fill(0); lastResult = null;
@@ -291,7 +355,8 @@ export function mountDashboard(): () => void {
         text("#recovery-note", "Reconnect the same wallet on Arc, then choose Retry the same request. The original encrypted request and payment ID are retained. Reconnecting does not submit a payment.");
       }
       text("#recovery-payment", `Payment ${request.challenge?.accepts[0]?.extra.paymentId ?? "unknown"}`);
-      $("#inference-recovery").hidden = false; void refresh(true);
+      $("#inference-recovery").hidden = false;
+      void refresh(true, error instanceof ApiError && ["INFERENCE_ATTESTATION_FAILED", "NEAR_VERIFICATION_FAILED", "INFERENCE_EXECUTION_UNCERTAIN"].includes(error.code));
     }).finally(() => { if (current()) setBusy(false); });
   }
 
@@ -315,33 +380,33 @@ export function mountDashboard(): () => void {
   on("#disconnect-gateway", "click", () => { clearWorkspace(); notify("Workspace disconnected. Local secrets cleared."); });
   let restoreAttempted = false;
   async function restoreLogin() {
-    if (restoreAttempted || walletToken || signingIn || life.signal.aborted) return;
+    if (restoreAttempted || walletToken || activeLogin || life.signal.aborted) return;
     let wallet; try { wallet = paymentWallet(); } catch { return; }
     restoreAttempted = true;
-    signingIn = true; $<HTMLButtonElement>("#wallet-login").disabled = true;
+    const attempt = beginLogin();
     text("#connection-status", "Restoring wallet workspace…");
     text("#wallet-login-status", "Restoring your wallet login and loading gateway policy…");
     const generation = loginGeneration, version = ++connectionVersion;
+    const current = () => activeLogin === attempt && !attempt.controller.signal.aborted && !life.signal.aborted && generation === loginGeneration && version === connectionVersion;
     try {
-      const session = await resumeWallet(wallet);
-      if (life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
+      const session = await resumeWallet(wallet, attempt.controller.signal);
+      if (!current()) return;
       if (!session) {
         text("#connection-status", "Disconnected"); text("#wallet-login-status", "Connect your wallet on Arc Mainnet, then sign in.");
         return;
       }
       walletToken = session.token;
       walletAddress = session.address.toLowerCase();
-      await connectWorkspace(session.token, "/api", version);
-      if (life.signal.aborted || generation !== loginGeneration || version !== connectionVersion) return;
+      await connectWorkspace(session.token, "/api", version, attempt.controller.signal);
+      if (!current()) return;
       applyWalletSession(session.expiresAt);
     } catch {
-      if (!life.signal.aborted && generation === loginGeneration && version === connectionVersion) {
+      if (current()) {
         if (walletToken) clearWorkspace();
         text("#connection-status", "Disconnected"); text("#wallet-login-status", "Wallet login could not resume. Sign in to load your workspace.");
       }
     } finally {
-      signingIn = false;
-      if (!life.signal.aborted) $<HTMLButtonElement>("#wallet-login").disabled = false;
+      finishLogin(attempt);
     }
   }
   function applyWalletSession(expiresAt: string) {
@@ -357,6 +422,13 @@ export function mountDashboard(): () => void {
     setBusy(busy);
   }
   const stopWalletListener = onWalletChanged(reason => {
+    if (activeLogin) {
+      cancelLogin();
+      loginGeneration++;
+      if (walletToken) clearWorkspace();
+      text("#wallet-login-status", "Wallet connection changed. Reconnect your wallet on Arc, then sign in again.");
+      text("#connection-error", "The sign-in request was cancelled because your wallet connection changed. You can reconnect and try again.");
+    }
     if (walletToken && reason === "connection") {
       const token = walletToken;
       let wallet = null;
@@ -375,29 +447,35 @@ export function mountDashboard(): () => void {
   void walletLoginAvailable().then(available => { if (!life.signal.aborted) { $("#wallet-login-panel").hidden = !available; $<HTMLDetailsElement>("#operator-access").open = !available; } });
   void restoreLogin();
   on("#wallet-login", "click", () => {
-    if (signingIn) return;
+    if (activeLogin) return;
     clearWorkspace(); const generation = ++loginGeneration, version = ++connectionVersion;
-    signingIn = true; $<HTMLButtonElement>("#wallet-login").disabled = true;
+    const attempt = beginLogin();
     text("#connection-error", ""); text("#wallet-login-status", "Approve the sign-in message in your connected wallet. No payment is requested.");
     void (async () => {
       const wallet = paymentWallet("sign-in");
-      const current = () => !life.signal.aborted && generation === loginGeneration && version === connectionVersion;
-      const session = await loginWallet(wallet, current);
+      const current = () => activeLogin === attempt && !attempt.controller.signal.aborted && !life.signal.aborted && generation === loginGeneration && version === connectionVersion;
+      const session = await loginWallet(wallet, current, attempt.controller.signal);
       if (!current()) { void logoutWallet(session.token).catch(() => {}); return; }
       walletToken = session.token;
       walletAddress = session.address.toLowerCase();
-      await connectWorkspace(session.token, "/api", version);
+      await connectWorkspace(session.token, "/api", version, attempt.controller.signal);
       if (!current()) return;
       applyWalletSession(session.expiresAt);
     })().catch((error: unknown) => {
-      if (generation === loginGeneration && !life.signal.aborted) { clearWorkspace(); text("#connection-error", message(error)); text("#wallet-login-status", "Sign-in was not completed. You can try again."); }
-    }).finally(() => { signingIn = false; if (!life.signal.aborted) $<HTMLButtonElement>("#wallet-login").disabled = false; });
+      if (activeLogin === attempt && generation === loginGeneration && !life.signal.aborted) {
+        clearWorkspace();
+        text("#connection-error", error instanceof Error && error.name === "TimeoutError"
+          ? "Sign-in timed out. Open your wallet and try again. If no request appears, reconnect your wallet." : message(error));
+        text("#wallet-login-status", error instanceof WalletSessionUnavailableError ? "Reconnect your wallet on Arc, then sign in again." : "Sign-in was not completed. You can try again.");
+      }
+    }).finally(() => { finishLogin(attempt); });
   });
-  async function connectWorkspace(apiKey: string, baseUrl: string, version: number) {
+  async function connectWorkspace(apiKey: string, baseUrl: string, version: number, signal = life.signal) {
     const next = new EnclaveClient({ apiKey, baseUrl });
+    const requestOptions = { signal: AbortSignal.any([life.signal, signal]) };
     if (!client && version === connectionVersion && !life.signal.aborted) text("#connection-status", "Loading workspace and gateway policy…");
     try {
-      const [h, w, m, p] = await Promise.all([next.health(options), next.workspace({}, options), next.models(options), next.policies(options)]);
+      const [h, w, m, p] = await Promise.all([next.health(requestOptions), next.workspace({}, requestOptions), next.models(requestOptions), next.policies(requestOptions)]);
       if (version !== connectionVersion || life.signal.aborted) { next.disconnect(); return; }
       client?.disconnect(); client = next; health = h; workspace = w; models = m; policies = p;
       historyVersion++; refreshRequest++; pageRequest++; polling = false; paginationBusy = false; historyExpanded = false;
@@ -408,14 +486,14 @@ export function mountDashboard(): () => void {
     } catch (error) { next.disconnect(); throw error; }
   }
   on("#connection-form", "submit", (event) => {
-    event.preventDefault(); loginGeneration++; clearTimeout(loginExpiry);
+    event.preventDefault(); cancelLogin(); loginGeneration++; clearTimeout(loginExpiry);
     if (walletToken) { void logoutWallet(walletToken).catch(() => {}); walletToken = null; }
     const version = ++connectionVersion;
     text("#connection-error", ""); $<HTMLButtonElement>("#connect-gateway").disabled = true;
     void connectWorkspace(input("#api-key").value.trim(), input("#gateway-url").value.trim(), version).catch((error: unknown) => { if (!life.signal.aborted) text("#connection-error", message(error)); }).finally(() => { if (!life.signal.aborted) $<HTMLButtonElement>("#connect-gateway").disabled = false; });
   });
   on("#inference-form", "submit", (event) => {
-    event.preventDefault(); const active = client; if (!active || busy || recovery) return;
+    event.preventDefault(); const active = client; if (!active || !health || busy || recovery) return;
     const prompt = input("#prompt").value.trim(); if (!prompt || prompt.length > 4000) return;
     const agentId = select("#execution-mode").value === "agent" ? select("#inference-agent").value : undefined;
     if (agentId === "") { text("#inference-error", "Create an agent mandate first."); return; }
@@ -434,7 +512,7 @@ export function mountDashboard(): () => void {
       text("#confirm-payment span", local ? "Settle test payment & run" : "Approve USDC payment & run");
       text("#payment-mode-note", local ? `This uses test USDC on local chain 31337. The gateway will settle the payment, run the configured model and issue a signed receipt.${prepared.health.inferenceBackend === "echo" ? "" : " Remote provider usage can still be billed."}` : real ? "This charges real USDC on Arc Mainnet. Check the amount and full recipient address below, then approve the authorization in your connected wallet. Failed inference does not automatically refund a settled payment." : "This gateway requires an external wallet authorization. Real-network settlement is not enabled in this dashboard.");
       text("#payment-error", ""); $<HTMLButtonElement>("#confirm-payment").disabled = !local && !real; dialog("#payment-dialog").showModal();
-    }).catch((error: unknown) => { if (!life.signal.aborted && client === active) { text("#inference-error", message(error)); text("#output-status", "Request stopped"); setBusy(false); void refresh(true); } });
+    }).catch((error: unknown) => { if (!life.signal.aborted && client === active) { text("#inference-error", message(error)); text("#output-status", "Request stopped"); setBusy(false); void refresh(true, error instanceof ApiError && ["INFERENCE_ATTESTATION_FAILED", "NEAR_VERIFICATION_FAILED", "INFERENCE_EXECUTION_UNCERTAIN"].includes(error.code)); } });
   });
   on("#confirm-payment", "click", () => {
     const active = client; const request = pending; if (!active || !request) return;

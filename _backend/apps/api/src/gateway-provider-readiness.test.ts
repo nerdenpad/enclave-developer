@@ -150,12 +150,12 @@ describe("strict provider admission readiness", () => {
     expect(state.accepted).toHaveBeenCalledOnce(); expect(state.archive).toHaveBeenCalledOnce();
     const response = await createApp(state.gateway, createLogger("silent")).request("/health");
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ deployment: { stage: "pilot", productionReady: false, providerAdmissionReady: false } });
+    expect(await response.json()).toMatchObject({ deployment: { stage: "production", productionReady: false, providerAdmissionReady: false } });
     state.preflight.mockRejectedValueOnce(failure);
     await expect(state.authorize()).rejects.toBe(failure);
     expect(state.fetch).not.toHaveBeenCalled(); expect(state.gateway.health().deployment.productionReady).toBe(false);
     await expect(state.authorize()).resolves.toMatchObject({ paymentId, mode: "authorized" });
-    expect(state.gateway.health().deployment.productionReady).toBe(true);
+    expect(state.gateway.health().deployment).toMatchObject({ stage: "production", productionReady: true, providerAdmissionReady: true });
     expect(state.preflight).toHaveBeenCalledTimes(3);
   });
   it("still fails startup for rejected archived evidence and untrusted errors", async () => {
@@ -215,7 +215,7 @@ describe("strict provider admission readiness", () => {
     await expect(state.authorize()).rejects.toBe(failure);
     const response = await createApp(state.gateway, createLogger("silent")).request("/health");
     expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toMatchObject({ ok: true, deployment: { stage: "pilot", productionReady: false, providerAdmissionReady: false } });
+    expect(await response.json()).toMatchObject({ ok: true, deployment: { stage: "production", productionReady: false, providerAdmissionReady: false } });
     expect(state.preflight).toHaveBeenCalledTimes(2); expect(state.fetch).not.toHaveBeenCalled(); expect(state.close).toHaveBeenCalledOnce();
     expect(JSON.stringify(state.gateway.health())).not.toContain("WORKLOAD_NOT_APPROVED");
     expect(JSON.stringify(state.gateway.health())).not.toContain("synthetic-provider-credential");
@@ -261,7 +261,7 @@ describe("strict provider admission readiness", () => {
     expect(state.gateway.health().deployment.productionReady).toBe(false); expect(state.preflight).toHaveBeenCalledOnce();
     await state.authorize(); expect(state.gateway.health().deployment.productionReady).toBe(true);
     vi.spyOn(Date, "now").mockReturnValue(Date.parse(state.release.manifest.acceptance.validUntil));
-    expect(state.gateway.health().deployment.productionReady).toBe(false);
+    expect(state.gateway.health().deployment).toMatchObject({ stage: "production", productionReady: false });
     await expect(state.authorize()).rejects.toThrow("expired"); expect(state.preflight).toHaveBeenCalledTimes(2);
   });
   it("clears readiness after known model revocation and restores it only after new chain and strict provider checks", async () => {

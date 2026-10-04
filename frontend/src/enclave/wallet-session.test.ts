@@ -355,3 +355,141 @@ describe("Arc network switching", () => {
   });
 });
 
+describe("bounded wallet sign-in approval", () => {
+  async function loginBrowser() {
+    const mock = browser(), changed = vi.fn();
+    mock.state.accounts = [signer.address]; mock.state.chain = "0x13b2";
+    const connection = await connectBrowserWallet(mock.wallet, new AbortController().signal, changed);
+    changed.mockClear();
+    return { mock, changed, connection };
+  }
+  function longSession() { const live = arcSession(); live.expiry = Math.floor(Date.now() / 1000) + 600; return live; }
+  function signInLocation() { vi.stubGlobal("location", { origin: "https://enclaveagent.tech" }); }
+
+  it.each(["session_delete", "session_expire", "session_update", "session_event", "disconnect", "detach"])("cancels hung WalletConnect login immediately on %s without waiting for the wallet", async event => {
+    signInLocation();
+    const { mock, changed, connection } = await approvedWallet(longSession()), gate = deferred<unknown>();
+    mock.request.mockReturnValueOnce(gate.promise);
+    const pending = connection.signIn(loginMessage()), rejected = expect(pending).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalledTimes(1)); changed.mockClear();
+    if (event === "disconnect") await connection.disconnect();
+    else if (event === "detach") connection.detach?.();
+    else mock.listeners.get(event)?.({ topic: "topic", ...(event === "session_update"
+      ? { params: { namespaces: { eip155: { accounts: [`eip155:5042:${second}`], methods: ["eth_signTypedData_v4", "personal_sign"] } } } }
+      : event === "session_event" ? { params: { chainId: "eip155:5042", event: { name: "chainChanged", data: "0x1" } } } : {}) });
+    await rejected;
+    expect(mock.listeners.size).toBe(0);
+    expect(changed).toHaveBeenCalledTimes(event === "detach" ? 0 : 1);
+    const notifications = changed.mock.calls.length;
+    gate.reject(Error("There is no existing session matching the topic"));
+    await Promise.resolve(); await Promise.resolve();
+    expect(changed).toHaveBeenCalledTimes(notifications); expect(mock.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out a hung WalletConnect personal_sign at 60 seconds and requires explicit reconnect", async () => {
+    vi.useFakeTimers(); signInLocation();
+    const { mock, changed, connection } = await approvedWallet(longSession()), gate = deferred<unknown>();
+    mock.request.mockReturnValueOnce(gate.promise); changed.mockClear();
+    const pending = connection.signIn(loginMessage()), rejected = expect(pending).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: "timeout" });
+    await Promise.resolve(); expect(mock.request).toHaveBeenCalledTimes(1);
+    let completed = false; void pending.then(() => { completed = true; }, () => { completed = true; });
+    await vi.advanceTimersByTimeAsync(59_999); expect(completed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.listeners.size).toBe(0); expect(vi.getTimerCount()).toBe(0);
+    await expect(connection.signIn(loginMessage())).rejects.toThrow(WalletSessionUnavailableError);
+    expect(mock.request).toHaveBeenCalledTimes(1);
+    gate.resolve(await signer.signMessage({ message: loginMessage() })); await Promise.resolve(); await Promise.resolve();
+    expect(changed).toHaveBeenCalledTimes(1);
+    const fresh = await approvedWallet(longSession()), message = loginMessage();
+    fresh.mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    await expect(fresh.connection.signIn(message)).resolves.toMatch(/^0x/); fresh.connection.detach?.();
+  });
+
+  it("consumes a late missing-topic failure after cancellation without invalidating a later explicit login", async () => {
+    signInLocation();
+    const { mock, changed, connection } = await approvedWallet(longSession()), gate = deferred<unknown>(), cancel = new AbortController();
+    mock.request.mockReturnValueOnce(gate.promise); changed.mockClear();
+    const pending = connection.signIn(loginMessage(), cancel.signal), rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalledTimes(1)); cancel.abort(); await rejected;
+    expect(changed).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+    const message = loginMessage(); mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    await expect(connection.signIn(message)).resolves.toMatch(/^0x/);
+    gate.reject(Error("There is no existing session matching the topic")); await Promise.resolve(); await Promise.resolve();
+    expect(() => connection.assertActive?.()).not.toThrow(); expect(changed).not.toHaveBeenCalled();
+    expect(mock.request).toHaveBeenCalledTimes(2); expect(mock.disconnect).not.toHaveBeenCalled(); connection.detach?.();
+  });
+
+  it("treats the caller's earlier whole-flow timeout as an explicit reconnect requirement", async () => {
+    signInLocation();
+    const { mock, changed, connection } = await approvedWallet(longSession()), gate = deferred<unknown>(), cancel = new AbortController();
+    mock.request.mockReturnValueOnce(gate.promise); changed.mockClear();
+    const pending = connection.signIn(loginMessage(), cancel.signal), rejected = expect(pending).rejects.toMatchObject({ reason: "timeout" });
+    await vi.waitFor(() => expect(mock.request).toHaveBeenCalledTimes(1));
+    cancel.abort(new DOMException("Login timed out", "TimeoutError")); await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    gate.reject(Error("late SDK failure")); await Promise.resolve(); await Promise.resolve();
+    expect(mock.request).toHaveBeenCalledTimes(1); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not request a signature or invalidate an approved session for a pre-cancelled login", async () => {
+    signInLocation();
+    const { mock, changed, connection } = await approvedWallet(longSession()), cancel = new AbortController();
+    changed.mockClear(); cancel.abort();
+    await expect(connection.signIn(loginMessage(), cancel.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(mock.request).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled();
+    expect(() => connection.assertActive?.()).not.toThrow(); connection.detach?.();
+  });
+
+  it("clears the login timeout after a valid WalletConnect approval", async () => {
+    vi.useFakeTimers(); signInLocation();
+    const { mock, changed, connection } = await approvedWallet(longSession()), message = loginMessage();
+    mock.request.mockResolvedValueOnce(await signer.signMessage({ message })); changed.mockClear();
+    await expect(connection.signIn(message)).resolves.toMatch(/^0x/);
+    expect(vi.getTimerCount()).toBe(1); // Only the live protocol-session expiry remains.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(() => connection.assertActive?.()).not.toThrow(); expect(changed).not.toHaveBeenCalled(); connection.detach?.();
+  });
+
+  it.each(["account", "network", "disconnect", "detach"])("cancels a hung browser login immediately on %s and discards a valid late signature", async event => {
+    signInLocation();
+    const { mock, changed, connection } = await loginBrowser(), gate = deferred<unknown>(), message = loginMessage();
+    mock.request.mockImplementation(async ({ method }) => method === "personal_sign" ? gate.promise : method === "eth_chainId" ? mock.state.chain : mock.state.accounts);
+    const pending = connection.signIn(message), rejected = expect(pending).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.request.mock.calls.some(([args]) => args.method === "personal_sign")).toBe(true));
+    if (event === "account") { mock.state.accounts = [second]; mock.listeners.get("accountsChanged")?.([second]); }
+    if (event === "network") { mock.state.chain = "0x1"; mock.listeners.get("chainChanged")?.("0x1"); }
+    if (event === "disconnect") await connection.disconnect();
+    if (event === "detach") connection.detach?.();
+    await rejected; await Promise.resolve(); await Promise.resolve();
+    const notifications = changed.mock.calls.length, requests = mock.request.mock.calls.length;
+    gate.resolve(await signer.signMessage({ message })); await Promise.resolve(); await Promise.resolve();
+    expect(changed).toHaveBeenCalledTimes(notifications); expect(mock.request).toHaveBeenCalledTimes(requests);
+    connection.detach?.();
+  });
+
+  it("bounds hanging browser account reads before signing and consumes their late response", async () => {
+    signInLocation();
+    const { mock, changed, connection } = await loginBrowser(), gate = deferred<unknown>(), cancel = new AbortController();
+    mock.request.mockImplementation(async ({ method }) => method === "eth_accounts" ? gate.promise : mock.state.chain);
+    const pending = connection.signIn(loginMessage(), cancel.signal), rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve(); cancel.abort(); await rejected;
+    gate.resolve([signer.address]); await Promise.resolve(); await Promise.resolve();
+    expect(mock.request.mock.calls.some(([args]) => args.method === "personal_sign")).toBe(false);
+    expect(changed).not.toHaveBeenCalled(); connection.detach?.();
+  });
+
+  it("bounds a hung browser signature and clears listeners without signing again", async () => {
+    vi.useFakeTimers(); signInLocation();
+    const { mock, changed, connection } = await loginBrowser(), gate = deferred<unknown>(), start = Date.now();
+    mock.request.mockImplementation(async ({ method }) => method === "personal_sign" ? gate.promise : method === "eth_chainId" ? mock.state.chain : mock.state.accounts);
+    const pending = connection.signIn(loginMessage()), rejected = expect(pending).rejects.toMatchObject({ reason: "timeout" });
+    await vi.waitFor(() => expect(mock.request.mock.calls.some(([args]) => args.method === "personal_sign")).toBe(true));
+    await vi.advanceTimersByTimeAsync(60_000 - (Date.now() - start)); await rejected;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.listeners.size).toBe(0); expect(vi.getTimerCount()).toBe(0);
+    expect(mock.request.mock.calls.filter(([args]) => args.method === "personal_sign")).toHaveLength(1);
+    gate.reject(Error("late browser request failure")); await Promise.resolve(); await Promise.resolve();
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+});
+

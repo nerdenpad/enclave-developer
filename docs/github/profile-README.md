@@ -26,17 +26,17 @@ and provider verification are separate checks.
 
 ### Release status
 
-The backend runs in production mode with a historically accepted NEAR + Arc
-release manifest. New payment/inference admission is blocked pending review of
-the current provider workload. The approved price is **0.10 USDC per request**.
-Real GPU inference, signed receipts and Arc settlement/anchoring passed historical
-acceptance on 1 October. Web QA fixes were deployed on 3 October 2026.
+The backend runs in production mode with reviewed provider policy v6 and an
+accepted NEAR + Arc release manifest installed on **4 October 2026**. A fresh
+operator EOA request passed strict GPU inference, a complete answer, signed
+receipt and **0.10 USDC** settlement/anchoring. Public backend and provider
+readiness were true at 10:05 UTC. Every new request still requires fresh
+verification. The approved price is **0.10 USDC per request**.
 Manual wallet acceptance is reopened after an OKX regression report; a real
 retest is still pending. The earlier owner confirmation
 on 3 October 2026 remains in the
 [acceptance history](https://github.com/nerdenpad/enclave-developer/blob/main/docs/release-progress.md#manual-wallet-regression--3-october-2026).
-The full E1 launch remains open pending current provider acceptance, that retest
-and live failure acceptance.
+The full E1 launch remains open pending that retest and live operational acceptance.
 
 What is live and what is still open is published in the
 [roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).

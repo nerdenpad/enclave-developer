@@ -175,6 +175,7 @@ export class EnclaveGateway {
           baseUrl: config.INFERENCE_BASE_URL, model: config.INFERENCE_MODEL, apiKey: config.INFERENCE_API_KEY!,
           timeoutMs: config.INFERENCE_TIMEOUT_MS, maxTokens: config.NEAR_MAX_TOKENS, enableThinking: config.NEAR_ENABLE_THINKING,
           verifyAttestation: createNearAttestationVerifier({ pythonPath: config.NEAR_VERIFIER_PYTHON!, policyPath: config.NEAR_ATTESTATION_POLICY!, apiKey: config.INFERENCE_API_KEY!,
+            maxDirectAdmissionAttempts: config.NEAR_DIRECT_ADMISSION_ATTEMPTS,
             ...nvidiaVerifierOptions(config),
             ...(config.NEAR_ATTESTATION_POLICY_SHA256 === undefined ? {} : { policySha256: config.NEAR_ATTESTATION_POLICY_SHA256 }) }),
         }) } : {}),
@@ -220,6 +221,7 @@ export class EnclaveGateway {
     this.providerAdmissionReady = false;
     try {
       const verified = await createNearAttestationVerifier({ pythonPath: this.config.NEAR_VERIFIER_PYTHON!,
+        maxDirectAdmissionAttempts: this.config.NEAR_DIRECT_ADMISSION_ATTEMPTS,
         ...nvidiaVerifierOptions(this.config),
         policyPath: this.config.NEAR_ATTESTATION_POLICY!, policySha256: this.config.NEAR_ATTESTATION_POLICY_SHA256!, apiKey: this.config.INFERENCE_API_KEY! })({
         baseUrl: this.config.INFERENCE_BASE_URL, model: this.config.INFERENCE_MODEL, signal: AbortSignal.timeout(this.config.INFERENCE_TIMEOUT_MS),
@@ -303,7 +305,8 @@ export class EnclaveGateway {
       verifierAddress: this.config.ATTESTATION_VERIFIER_ADDRESS,
       agentRuntimeEnabled: this.config.AGENT_RUNTIME_ENABLED,
       inferencePriceUsdc: this.config.INFERENCE_PRICE_USDC,
-      deployment: { stage: productionReady ? "production" as const : managed ? "pilot" as const : "development" as const,
+      // Deployment mode stays stable; provider and release failures affect readiness.
+      deployment: { stage: this.config.NODE_ENV === "production" ? "production" as const : managed ? "pilot" as const : "development" as const,
         productionReady, providerAdmissionReady: this.providerAdmissionReady, gatewayKeyCustody: "software" as const,
         inferenceTrust: managed ? "near-cpu-gpu" as const : "development" as const,
         releaseProfile: managed ? "near-arc" as const : "development" as const },

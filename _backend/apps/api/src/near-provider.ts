@@ -5,12 +5,17 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { isAbsolute } from "node:path";
 import { checkServerIdentity, type PeerCertificate, type TLSSocket } from "node:tls";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { AppError, sha256Hex } from "@enclave/core";
 import type { NearAttestationVerifier, NearVerifiedFetch } from "@enclave/core";
 
 export type NvidiaLocalRuntime = { binaryPath: string; libraryPath: string };
-export type NearProviderOptions = { pythonPath: string; policyPath: string; policySha256?: string; verifierPath?: string; apiKey?: string; nvidiaLocal?: NvidiaLocalRuntime };
+export type NearProviderOptions = {
+  pythonPath: string; policyPath: string; policySha256?: string; verifierPath?: string; apiKey?: string; nvidiaLocal?: NvidiaLocalRuntime;
+  /** Trusted operator limit for direct attestation GETs only. Never retries inference. */
+  maxDirectAdmissionAttempts?: number;
+};
 /** Explicit trusted operator configuration; never inherit ambient vendor settings. */
 export function nvidiaVerifierOptions(env: { NVIDIA_VERIFIER_MODE?: string | undefined; NVIDIA_NVAT_BINARY?: string | undefined; NVIDIA_NVAT_LIBRARY?: string | undefined }): Pick<NearProviderOptions, "nvidiaLocal"> {
   const mode = env.NVIDIA_VERIFIER_MODE ?? "nras";
@@ -59,8 +64,14 @@ export type NearAttestationFailure =
 // Only this private class carries trusted diagnostics through outer catches.
 // Arbitrary errors, caller details, stderr and provider fields are never copied.
 class NearAttestationError extends AppError {
+  readonly #diagnostic: NearAttestationFailure;
   constructor(diagnostic: NearAttestationFailure) {
     super("INFERENCE_ATTESTATION_FAILED", "NEAR hardware attestation or transport verification failed", 503, { attestationFailure: diagnostic });
+    this.#diagnostic = diagnostic;
+  }
+  isUnapprovedWorkload(): boolean {
+    return this.#diagnostic.stage === "verifier" && this.#diagnostic.reason === "rejected"
+      && this.#diagnostic.verifierError === "WORKLOAD_NOT_APPROVED";
   }
 }
 const unavailable = (diagnostic: NearAttestationFailure = { stage: "transport", reason: "request" }) => new NearAttestationError(diagnostic);
@@ -231,87 +242,124 @@ export async function runNearVerifier(options: NearProviderOptions, input: unkno
 export function createNearAttestationVerifier(options: NearProviderOptions): NearAttestationVerifier {
   if (!options.pythonPath || !options.policyPath) throw new Error("NEAR verifier runtime and versioned policy are required");
   if (options.policySha256 !== undefined && !/^0x[0-9a-f]{64}$/.test(options.policySha256)) throw new Error("NEAR policy fingerprint must be lowercase bytes32");
+  const configuredAttempts = options.maxDirectAdmissionAttempts ?? 1;
+  if (!Number.isSafeInteger(configuredAttempts) || configuredAttempts < 1 || configuredAttempts > 3) throw new Error("NEAR direct admission attempts must be an integer from 1 to 3");
+  if (configuredAttempts > 1 && options.policySha256 === undefined) throw new Error("NEAR direct admission retries require a pinned policy fingerprint");
   return async ({ baseUrl, model, signal }) => {
     const base = nearBaseUrl(baseUrl);
     const cloud = base.hostname === "cloud-api.near.ai";
-    const nonce = randomBytes(32).toString("hex");
-    const reportUrl = new URL("/v1/attestation/report", base);
-    reportUrl.searchParams.set("signing_algo", "ecdsa");
-    reportUrl.searchParams.set("nonce", nonce);
-    reportUrl.searchParams.set("include_tls_fingerprint", "true");
-    if (cloud) {
-      reportUrl.searchParams.set("model", model);
-      reportUrl.searchParams.set("provider", "near");
-      if (!options.apiKey?.trim() || /[\r\n]/.test(options.apiKey)) throw unavailable({ stage: "configuration", reason: "credentials" });
-    }
-    let attestedSpki: string | undefined;
-    let handedOff = false;
-    // Reuse the attested connection across the provider's load balancer. Every
-    // reconnect still requires CA/hostname validation and the verified SPKI.
-    const bootstrapAgent = new https.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1, maxCachedSessions: 0,
-      checkServerIdentity: (host, cert) => attestedSpki === undefined
-        ? checkServerIdentity(host, cert) : checkNearCertificate(host, cert, attestedSpki),
-    });
-    try {
-      const { response, peerSpki } = await requestBytes(reportUrl, { signal, headers: { accept: "application/json", "accept-encoding": "identity",
-        ...(cloud ? { authorization: `Bearer ${options.apiKey}`, "x-no-aliasing": "true" } : {}) } }, bootstrapAgent);
-      if (response.status !== 200) throw unavailable({ stage: "report", reason: "http-status" });
-      const rawReport = await response.text();
-      let report: Record<string, unknown>;
+    const attempts = cloud ? 1 : configuredAttempts;
+    const readRetryPolicy = async (): Promise<Buffer> => {
+      if (signal.aborted) throw unavailable({ stage: "transport", reason: "aborted" });
+      const bytes = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
+      if (bytes.length > 1_048_576) throw unavailable({ stage: "policy", reason: "size" });
+      if (sha256Hex(bytes) !== options.policySha256) throw unavailable({ stage: "policy", reason: "changed" });
+      if (signal.aborted) throw unavailable({ stage: "transport", reason: "aborted" });
+      return bytes;
+    };
+    const retryPolicy = attempts > 1 ? await readRetryPolicy() : undefined;
+    const verifyAttempt = async () => {
+      if (signal.aborted) throw unavailable({ stage: "transport", reason: "aborted" });
+      const nonce = randomBytes(32).toString("hex");
+      const reportUrl = new URL("/v1/attestation/report", base);
+      reportUrl.searchParams.set("signing_algo", "ecdsa");
+      reportUrl.searchParams.set("nonce", nonce);
+      reportUrl.searchParams.set("include_tls_fingerprint", "true");
+      if (cloud) {
+        reportUrl.searchParams.set("model", model);
+        reportUrl.searchParams.set("provider", "near");
+        if (!options.apiKey?.trim() || /[\r\n]/.test(options.apiKey)) throw unavailable({ stage: "configuration", reason: "credentials" });
+      }
+      let attestedSpki: string | undefined;
+      let handedOff = false;
+      // Reuse the attested connection across the provider's load balancer. Every
+      // reconnect still requires CA/hostname validation and the verified SPKI.
+      const bootstrapAgent = new https.Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1, maxCachedSessions: 0,
+        checkServerIdentity: (host, cert) => attestedSpki === undefined
+          ? checkServerIdentity(host, cert) : checkNearCertificate(host, cert, attestedSpki),
+      });
       try {
-        const value: unknown = JSON.parse(rawReport);
-        if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable({ stage: "report", reason: "shape" });
-        report = value as Record<string, unknown>;
+        const { response, peerSpki } = await requestBytes(reportUrl, { signal, headers: { accept: "application/json", "accept-encoding": "identity",
+          ...(cloud ? { authorization: `Bearer ${options.apiKey}`, "x-no-aliasing": "true" } : {}) } }, bootstrapAgent);
+        if (response.status !== 200) throw unavailable({ stage: "report", reason: "http-status" });
+        const rawReport = await response.text();
+        let report: Record<string, unknown>;
+        try {
+          const value: unknown = JSON.parse(rawReport);
+          if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable({ stage: "report", reason: "shape" });
+          report = value as Record<string, unknown>;
+        } catch (error) {
+          if (error instanceof NearAttestationError) throw error;
+          throw unavailable({ stage: "report", reason: "json" });
+        }
+        const gatewayReport = cloud ? report.gateway_attestation as Record<string, unknown> | undefined : report;
+        if (!gatewayReport || typeof gatewayReport !== "object" || Array.isArray(gatewayReport)
+          || typeof gatewayReport.request_nonce !== "string" || typeof gatewayReport.tls_cert_fingerprint !== "string"
+          || (cloud && (!Array.isArray(report.model_attestations) || report.model_attestations.length < 1))) throw unavailable({ stage: "report", reason: "shape" });
+        if (gatewayReport.request_nonce !== nonce) throw unavailable({ stage: "report", reason: "nonce-binding" });
+        if (normalizeHex(gatewayReport.tls_cert_fingerprint) !== peerSpki) throw unavailable({ stage: "report", reason: "tls-binding" });
+        if (!cloud && report.model_name !== model) throw unavailable({ stage: "report", reason: "model-binding" });
+        const policyBefore = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
+        if (policyBefore.length > 1_048_576) throw unavailable({ stage: "policy", reason: "size" });
+        if (retryPolicy && !policyBefore.equals(retryPolicy)) throw unavailable({ stage: "policy", reason: "changed" });
+        const verdict = await runNearVerifier(options, cloud
+          ? { attestation: report, model, nonce, tlsSpkiSha256: peerSpki }
+          : { attestation: report, nonce, tlsSpkiSha256: peerSpki }, signal, cloud);
+        const now = Date.now();
+        if (normalizeHex(verdict.tlsSpkiSha256) !== peerSpki) throw unavailable({ stage: "session", reason: "tls-binding" });
+        if (!cloud && (typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase())) throw unavailable({ stage: "session", reason: "signer" });
+        if ((!cloud && verdict.allowedSigners !== undefined && (verdict.allowedSigners.length !== 1
+            || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
+          || (cloud && (!verdict.allowedSigners || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))) throw unavailable({ stage: "session", reason: "signer-set" });
+        if (Date.parse(verdict.verifiedAt) > now + 5_000 || Date.parse(verdict.verifiedAt) < now - 300_000
+          || Date.parse(verdict.expiresAt) <= now || Date.parse(verdict.expiresAt) > Date.parse(verdict.verifiedAt) + 300_000) throw unavailable({ stage: "session", reason: "time" });
+        const policyAfter = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
+        if (!policyBefore.equals(policyAfter)) throw unavailable({ stage: "policy", reason: "changed" });
+        if (signal.aborted) throw unavailable({ stage: "transport", reason: "aborted" });
+        attestedSpki = peerSpki;
+        const pinnedFetch: NearVerifiedFetch = async (url, init) => {
+          if (url.origin !== base.origin) throw unavailable({ stage: "session", reason: "origin" });
+          if (Date.parse(verdict.expiresAt) <= Date.now()) throw unavailable({ stage: "session", reason: "expired" });
+          let wire: WireResponse;
+          try { wire = await requestBytes(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "accept-encoding": "identity" } }, bootstrapAgent); }
+          catch (error) { throw transportFailure(error, init.signal); }
+          if (wire.peerSpki !== peerSpki) throw unavailable({ stage: "session", reason: "tls-binding" });
+          if (wire.response.headers.get("content-encoding") && wire.response.headers.get("content-encoding") !== "identity") throw unavailable({ stage: "transport", reason: "encoding" });
+          return wire.response;
+        };
+        const session = {
+          allowedSigners: (cloud ? verdict.allowedSigners! : [verdict.signingAddress]) as `0x${string}`[],
+          attestationRef: `0x${normalizeHex(verdict.attestationRef)}` as `0x${string}`,
+          verifiedAt: verdict.verifiedAt, expiresAt: verdict.expiresAt, tlsBound: true as const,
+          fetch: pinnedFetch, close: () => bootstrapAgent.destroy(),
+          attestationProof: JSON.stringify({ report: JSON.parse(rawReport), verdict, policy: JSON.parse(policyBefore.toString("utf8")), policyHash: sha256Hex(policyBefore) }),
+        };
+        handedOff = true;
+        return session;
       } catch (error) {
         if (error instanceof NearAttestationError) throw error;
-        throw unavailable({ stage: "report", reason: "json" });
+        throw transportFailure(error, signal);
       }
-      const gatewayReport = cloud ? report.gateway_attestation as Record<string, unknown> | undefined : report;
-      if (!gatewayReport || typeof gatewayReport !== "object" || Array.isArray(gatewayReport)
-        || typeof gatewayReport.request_nonce !== "string" || typeof gatewayReport.tls_cert_fingerprint !== "string"
-        || (cloud && (!Array.isArray(report.model_attestations) || report.model_attestations.length < 1))) throw unavailable({ stage: "report", reason: "shape" });
-      if (gatewayReport.request_nonce !== nonce) throw unavailable({ stage: "report", reason: "nonce-binding" });
-      if (normalizeHex(gatewayReport.tls_cert_fingerprint) !== peerSpki) throw unavailable({ stage: "report", reason: "tls-binding" });
-      if (!cloud && report.model_name !== model) throw unavailable({ stage: "report", reason: "model-binding" });
-      const policyBefore = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
-      if (policyBefore.length > 1_048_576) throw unavailable({ stage: "policy", reason: "size" });
-      const verdict = await runNearVerifier(options, cloud
-        ? { attestation: report, model, nonce, tlsSpkiSha256: peerSpki }
-        : { attestation: report, nonce, tlsSpkiSha256: peerSpki }, signal, cloud);
-      const now = Date.now();
-      if (normalizeHex(verdict.tlsSpkiSha256) !== peerSpki) throw unavailable({ stage: "session", reason: "tls-binding" });
-      if (!cloud && (typeof report.signing_address !== "string" || verdict.signingAddress.toLowerCase() !== report.signing_address.toLowerCase())) throw unavailable({ stage: "session", reason: "signer" });
-      if ((!cloud && verdict.allowedSigners !== undefined && (verdict.allowedSigners.length !== 1
-          || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))
-        || (cloud && (!verdict.allowedSigners || verdict.allowedSigners[0]?.toLowerCase() !== verdict.signingAddress.toLowerCase()))) throw unavailable({ stage: "session", reason: "signer-set" });
-      if (Date.parse(verdict.verifiedAt) > now + 5_000 || Date.parse(verdict.verifiedAt) < now - 300_000
-        || Date.parse(verdict.expiresAt) <= now || Date.parse(verdict.expiresAt) > Date.parse(verdict.verifiedAt) + 300_000) throw unavailable({ stage: "session", reason: "time" });
-      const policyAfter = await readFile(options.policyPath).catch(() => { throw unavailable({ stage: "policy", reason: "unreadable" }); });
-      if (!policyBefore.equals(policyAfter)) throw unavailable({ stage: "policy", reason: "changed" });
-      attestedSpki = peerSpki;
-      const pinnedFetch: NearVerifiedFetch = async (url, init) => {
-        if (url.origin !== base.origin) throw unavailable({ stage: "session", reason: "origin" });
-        if (Date.parse(verdict.expiresAt) <= Date.now()) throw unavailable({ stage: "session", reason: "expired" });
-        let wire: WireResponse;
-        try { wire = await requestBytes(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "accept-encoding": "identity" } }, bootstrapAgent); }
-        catch (error) { throw transportFailure(error, init.signal); }
-        if (wire.peerSpki !== peerSpki) throw unavailable({ stage: "session", reason: "tls-binding" });
-        if (wire.response.headers.get("content-encoding") && wire.response.headers.get("content-encoding") !== "identity") throw unavailable({ stage: "transport", reason: "encoding" });
-        return wire.response;
-      };
-      const session = {
-        allowedSigners: (cloud ? verdict.allowedSigners! : [verdict.signingAddress]) as `0x${string}`[],
-        attestationRef: `0x${normalizeHex(verdict.attestationRef)}` as `0x${string}`,
-        verifiedAt: verdict.verifiedAt, expiresAt: verdict.expiresAt, tlsBound: true as const,
-        fetch: pinnedFetch, close: () => bootstrapAgent.destroy(),
-        attestationProof: JSON.stringify({ report: JSON.parse(rawReport), verdict, policy: JSON.parse(policyBefore.toString("utf8")), policyHash: sha256Hex(policyBefore) }),
-      };
-      handedOff = true;
-      return session;
-    } catch (error) {
-      if (error instanceof NearAttestationError) throw error;
-      throw transportFailure(error, signal);
+      finally { if (!handedOff) bootstrapAgent.destroy(); }
+    };
+    // Only an authenticated verifier rejection of an unknown direct workload
+    // can select another connection. Every candidate still needs fresh complete
+    // hardware verification under the same pinned policy and caller deadline.
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (retryPolicy && !(await readRetryPolicy()).equals(retryPolicy)) throw unavailable({ stage: "policy", reason: "changed" });
+      try { return await verifyAttempt(); }
+      catch (error) {
+        if (signal.aborted) {
+          if (error instanceof NearAttestationError && !error.isUnapprovedWorkload()) throw error;
+          throw unavailable({ stage: "transport", reason: "aborted" });
+        }
+        if (cloud || !(error instanceof NearAttestationError) || !error.isUnapprovedWorkload() || attempt + 1 >= attempts) throw error;
+        // Destroyed by verifyAttempt's finally before waiting or selecting again.
+        if (retryPolicy && !(await readRetryPolicy()).equals(retryPolicy)) throw unavailable({ stage: "policy", reason: "changed" });
+        try { await delay(100, undefined, { signal }); }
+        catch (waitError) { throw transportFailure(waitError, signal); }
+      }
     }
-    finally { if (!handedOff) bootstrapAgent.destroy(); }
+    throw unavailable({ stage: "verifier", reason: "process-failed" });
   };
 }

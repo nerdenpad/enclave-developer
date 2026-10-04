@@ -1,6 +1,6 @@
 # Arc Mainnet deployment
 
-Arc Mainnet is the selected USDC settlement network. Contracts were deployed on 26 September 2026 against the reviewed USDC token. The hosted API and worker use chain `5042` with `PAYMENT_MODE=authorized` and a dedicated relay. The backend runs in production mode with a historical accepted release manifest; new payment/inference admission is blocked pending current provider workload review and fresh acceptance. Public browser checkout is enabled at the approved **0.10 USDC per request**. Serving policy version 2 is registered, approved and active.
+Arc Mainnet is the selected USDC settlement network. Contracts were deployed on 26 September 2026 against the reviewed USDC token. The hosted API and worker use chain `5042` with `PAYMENT_MODE=authorized` and a dedicated relay. Reviewed provider policy v6 passed a fresh paid acceptance on 4 October 2026 and is installed with its accepted release manifest; public backend and provider readiness were true at 10:05 UTC. Public browser checkout is configured at the approved **0.10 USDC per request**. Serving policy version 2 is registered, approved and active.
 
 See [payment operations](payment-launch.md) for wallet roles and [release progress](release-progress.md) for confirmed settlement and receipt transactions. Web QA fixes were deployed on 3 October 2026. Manual wallet acceptance is reopened after an OKX regression report; a real retest is still pending, while the earlier 3 October owner confirmation remains in the acceptance history.
 
@@ -28,7 +28,7 @@ This read-only check verifies chain ID, token name/version/decimals, the on-chai
 
 ## Deployment and acceptance checklist
 
-The deployed payment path passed three real paid requests, including a WalletConnect operator browser journey and a complete final model answer. The checklist below also applies to a replacement deployment. A real manual OKX retest, live settlement interruption, signer rotation and model revocation remain in the [E1 acceptance matrix](e1-release.md).
+The deployed payment path passed four real paid requests totalling 0.40 USDC, including a WalletConnect operator browser journey and complete final model answers. The fourth passed under reviewed provider policy v6 on 4 October 2026. The checklist below also applies to a replacement deployment. A real manual OKX retest, live settlement interruption, signer rotation and model revocation remain in the [E1 acceptance matrix](e1-release.md).
 
 1. Supply independently controlled deployment, governance and relay wallets, funded with Arc USDC for gas. Never reuse public Anvil private keys. Create a separate deployment record and payment state; do not reinterpret existing mock-chain records as mainnet payments.
 2. Review RPC availability, gas estimation and finality handling against [Arc EVM differences](https://docs.arc.io/arc/references/evm-differences). Standard Anvil tests alone do not cover Arc-specific execution behavior.

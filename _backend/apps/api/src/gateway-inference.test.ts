@@ -123,18 +123,21 @@ describe("gateway inference adapter configuration", () => {
     expect(gateway.health()).toMatchObject({ teeMode: "managed-near", deployment: { stage: "production", productionReady: true, gatewayKeyCustody: "software" },
       providerPolicy: { sha256: release.providerPolicyHash } });
   });
-  it("wires the hardware verifier into only the verified provider adapter without a startup inference call", async () => {
+  it.each([1, 3])("wires %i admission attempts into only the verified provider adapter without a startup inference call", async (attempts) => {
     const config = loadConfig({ DATABASE_URL: "postgres://unit.invalid/test", NODE_ENV: "test", INFERENCE_BACKEND: "near-verified",
       INFERENCE_BASE_URL: "https://test.completions.near.ai/v1", INFERENCE_MODEL: "Qwen/Test", INFERENCE_ALLOW_REMOTE: "true",
       INFERENCE_API_KEY: "near-test-secret", INFERENCE_TIMEOUT_MS: "120000", NEAR_VERIFIER_PYTHON: "fixture-python",
-      NEAR_ATTESTATION_POLICY: "fixture-policy.json", NEAR_MAX_TOKENS: "128" });
+      NEAR_ATTESTATION_POLICY: "fixture-policy.json", NEAR_MAX_TOKENS: "128",
+      ...(attempts > 1 ? { TEE_MODE: "managed-near", NEAR_ENDPOINT_PROFILE: "direct-experimental",
+        NEAR_ATTESTATION_POLICY_SHA256: `0x${"ab".repeat(32)}`, NEAR_DIRECT_ADMISSION_ATTEMPTS: String(attempts) } : {}) });
     const hook = vi.fn<core.NearAttestationVerifier>().mockRejectedValue(new Error("fixture does not access hardware"));
     const makeVerifier = vi.spyOn(near, "createNearAttestationVerifier").mockReturnValue(hook);
     const adapter = vi.spyOn(core, "createNearInference");
     const generic = vi.spyOn(core, "createOpenAICompatibleInference");
     const cvm = vi.spyOn(core.DevCvm, "create");
     const gateway = await EnclaveGateway.boot({} as Parameters<typeof EnclaveGateway.boot>[0], config, createLogger("silent"), undefined);
-    expect(makeVerifier).toHaveBeenCalledExactlyOnceWith({ pythonPath: "fixture-python", policyPath: "fixture-policy.json", apiKey: "near-test-secret" });
+    expect(makeVerifier).toHaveBeenCalledExactlyOnceWith({ pythonPath: "fixture-python", policyPath: "fixture-policy.json", apiKey: "near-test-secret",
+      maxDirectAdmissionAttempts: attempts, ...(attempts > 1 ? { policySha256: `0x${"ab".repeat(32)}` } : {}) });
     expect(adapter).toHaveBeenCalledExactlyOnceWith({ baseUrl: config.INFERENCE_BASE_URL, model: "Qwen/Test", apiKey: "near-test-secret",
       timeoutMs: 120_000, maxTokens: 128, enableThinking: false, verifyAttestation: hook });
     expect(cvm.mock.calls[0]![0].verifiedInference).toBeTypeOf("function");
@@ -143,7 +146,7 @@ describe("gateway inference adapter configuration", () => {
     expect(hook).not.toHaveBeenCalled();
     await expect(cvm.mock.calls[0]![0].verifiedInference!(Buffer.from("fixture prompt"))).rejects.toMatchObject({ code: "NEAR_VERIFICATION_FAILED" });
     expect(hook).toHaveBeenCalledOnce();
-    expect(gateway.health()).toMatchObject({ teeMode: "dev" });
+    expect(gateway.health()).toMatchObject({ teeMode: config.TEE_MODE });
     expect(JSON.stringify(gateway.health())).not.toContain("near-test-secret");
   });
   it("sends the configured thinking control and output budget through the verified transport", async () => {
