@@ -213,14 +213,14 @@ test("wallet loss while login is loading cancels restoration without resurrectin
   await page.evaluate(() => { Reflect.get(window, "fixtureDropWallet")(); });
   held.release();
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
-  await expect(page.locator("#wallet-login-status")).toContainText("Wallet connection changed");
+  await expect(page.locator("#wallet-login-status")).toHaveText("Connect your wallet on Arc Mainnet, then sign in. Signing in is free.");
   await expect(page.locator("#run-inference")).toBeDisabled();
   await expect(page.locator("#new-agent")).toBeDisabled(); await expect(page.locator("#issue-view-key")).toBeDisabled();
   await expect(page.locator("#export-receipts-csv")).toBeDisabled();
   await expect(page.locator("#receipt-rows tr")).toHaveCount(0);
   await page.clock.fastForward(1_805_000);
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
-  await expect(page.locator("#wallet-login-status")).toContainText("Wallet connection changed");
+  await expect(page.locator("#wallet-login-status")).toHaveText("Connect your wallet on Arc Mainnet, then sign in. Signing in is free.");
   await expect(page.locator("#export-receipts-csv")).toBeDisabled();
   expect(f.walletCalls.filter(method => /sign/i.test(method))).toEqual(["personal_sign"]);
   expect(f.counts()).toEqual({ settlements: 0, paidAttempts: 0 });

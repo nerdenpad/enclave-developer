@@ -1,6 +1,6 @@
 # Wallet connections and real USDC
 
-The final domain is **enclaveagent.tech**. The payment network is **Arc Mainnet (5042)** and the approved price is **0.10 USDC per request**. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. An operator EOA request passed payment, complete model response, receipt and confirmed anchor on 4 October 2026, with readiness reported that morning. The later physical OKX retest stopped on `WORKLOAD_NOT_APPROVED` before settlement; backend readiness subsequently reported false. The earlier WalletConnect operator browser journey passed on 1 October. Wallet connection remains separate from sign-in and payment. Physical OKX paid acceptance, live settlement interruption, signer rotation and model revocation acceptance remain open. See [release progress](release-progress.md) for dated evidence and the [Arc deployment profile](arc-deployment.md) for configuration.
+The final domain is **enclaveagent.tech**. The payment network is **Arc Mainnet (5042)** and the approved price is **0.10 USDC per request**. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. An operator EOA request passed payment, complete model response, receipt and confirmed anchor on 4 October 2026. On 5 October, the owner reported one successful paid wallet request with a correct answer and independent receipt/Arc-anchor checks. Fixes for stale OKX sessions, login messages and browser CI are implemented and passed local validation; a GitHub browser rerun and manual recovery checks remain pending. One request does not establish full wallet compatibility. Wallet connection remains separate from sign-in and payment. Live settlement interruption, signer rotation and model revocation acceptance remain open. See [release progress](release-progress.md) for dated evidence and the [Arc deployment profile](arc-deployment.md) for configuration.
 
 ## Implemented connection
 
@@ -53,8 +53,9 @@ physical wallet-app UI.
 The project owner confirmed manual wallet acceptance on **3 October 2026**.
 Acceptance was subsequently reopened following the detailed OKX failure report
 for **2 October 2026, 22:16–22:24 Moscow time**. Corrective web fixes were deployed
-on **3 October 2026**. Provider v6 paid acceptance completed on 4 October, but a
-physical OKX retest is still pending; the earlier confirmation remains in the
+on **3 October 2026**. Provider v6 paid acceptance completed on 4 October. An
+owner-reported paid wallet retest passed once on 5 October; old-session recovery
+and broader wallet acceptance remain open. The earlier confirmation remains in the
 [acceptance history](release-progress.md#manual-wallet-regression--3-october-2026).
 The 3 October canonical Arc readback found the reported payment's exact intent
 unsettled in UsageMeter at block **24086493** with **12 successor blocks**.

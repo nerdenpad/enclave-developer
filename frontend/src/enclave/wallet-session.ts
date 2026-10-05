@@ -242,6 +242,9 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
   const proposal = restore ? { uri: undefined, approval: async () => client.session.get(restore.topic) } : await client.connect({ requiredNamespaces: { eip155: { chains: [`eip155:${chainId}`], methods: ["eth_signTypedData_v4", "personal_sign"], events: ["accountsChanged", "chainChanged"] } } });
   const reason = { code: 6000, message: "User disconnected" };
   let acceptedTopic: string | undefined;
+  let retirement: Promise<void> | undefined;
+  const retireTopic = (topic: string) => retirement ??= Promise.resolve()
+    .then(() => client.disconnect({ topic, reason })).catch(() => {});
   const cancelPairing = () => {
     const topic = proposal.uri?.match(/^wc:([a-f0-9]{64})@2\?/i)?.[1];
     if (topic) void client.core.pairing.disconnect({ topic }).catch(() => {});
@@ -285,6 +288,10 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
       unavailable = error;
       cleanup();
       if (error.reason === "changed") changed(null, "identity"); else changed(null);
+      // A peer-rejected topic may remain in the SDK's local session store even
+      // after its UI connection was invalidated. Retire only this exact topic,
+      // without blocking or repeating the failed signature request.
+      if (error.reason === "missing" || error.reason === "expired") void retireTopic(topic);
     };
     const check = (method?: string) => {
       if (!active) throw unavailable;
@@ -305,11 +312,10 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
       }
     };
     const disconnect = async () => {
-      if (!active) return;
-      invalidate(new WalletSessionUnavailableError());
+      if (active) invalidate(new WalletSessionUnavailableError());
       // A locally missing session is already disconnected. Do not let SDK cleanup
       // failures turn lifecycle callbacks into unhandled promise rejections.
-      await client.disconnect({ topic, reason }).catch(() => {});
+      await retireTopic(topic);
     };
     const dropped = (event: { topic: string }) => { if (event.topic === topic) invalidate(new WalletSessionUnavailableError("missing")); };
     const expired = (event: { topic: string }) => { if (event.topic === topic) invalidate(new WalletSessionUnavailableError("expired")); };
@@ -342,11 +348,11 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
         } catch {
           // The fresh session check already notified the UI. Close any remaining
           // SDK session without allowing a missing-topic cleanup error to escape.
-          void client.disconnect({ topic, reason }).catch(() => {}); return;
+          void retireTopic(topic); return;
         }
         if (!changeReason) return;
         invalidate(new WalletSessionUnavailableError(changeReason));
-        void client.disconnect({ topic, reason }).catch(() => {});
+        void retireTopic(topic);
       }
     };
     const scheduleExpiry = () => {
@@ -395,7 +401,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
       check("personal_sign"); return signature;
     }, pendingRequests, signal, error => {
       invalidate(error);
-      void client.disconnect({ topic, reason }).catch(() => {});
+      void retireTopic(topic);
     }), authorizeArc: async intent => {
       check("eth_signTypedData_v4");
       if (chainId !== arc.chainId || account.address.toLowerCase() !== intent.payer.toLowerCase()) throw Error("Reconnect the payer wallet on Arc Mainnet");
@@ -405,7 +411,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     } };
   } catch (error) {
     cancelPairing();
-    if (acceptedTopic && !restore) await client.disconnect({ topic: acceptedTopic, reason }).catch(() => {});
+    if (acceptedTopic && !restore) await retireTopic(acceptedTopic);
     // Always consume eventual rejection even when cancelled before awaiting approval.
     void approval.catch(() => {});
     throw error;

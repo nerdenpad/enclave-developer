@@ -19,7 +19,11 @@ verification and payment status are checked separately on the
 > The accepted release is installed; at 10:05 UTC the production API reported
 > provider admission and backend readiness as ready. Every request still requires
 > fresh verification. The approved price is **0.10 USDC per request**.
-> A real OKX retest and the remaining E1 operational acceptance are still open.
+> On **5 October 2026**, the owner reported one successful paid wallet request
+> with a correct answer and independent receipt and Arc-anchor checks. Fixes for
+> old-session recovery, login messages and browser CI are implemented and passed
+> local validation. A GitHub browser rerun and manual recovery checks remain
+> pending; full E1 operational acceptance is still open.
 > See [deployment status](https://enclaveagent.tech/status),
 > [acceptance evidence](docs/release-progress.md) and
 > [remaining E1 checks](docs/e1-release.md).

@@ -59,7 +59,7 @@ test("legacy page footers all follow reported status while public checkout remai
   }
 });
 
-test("status history records operator acceptance and the approved price while browser acceptance remains pending", async ({ page }) => {
+test("status history preserves reviewed acceptance and the approved price when live status is unavailable", async ({ page }) => {
   await page.route("**/api/**", route => route.fulfill({ status: 503, json: { title: "UNAVAILABLE" } }));
   await page.goto("/status");
   const history = page.getByLabel("Update history");
@@ -69,9 +69,10 @@ test("status history records operator acceptance and the approved price while br
   await expect(history).toContainText("paid 0.10 USDC and anchored its receipt on Arc");
   await expect(history).toContainText("one settlement and one usage record");
   await expect(history).toContainText("The commercial price is approved at 0.10 USDC per request");
-  await expect(history).toContainText("Public E1 launch remains pending desktop/mobile wallet payment acceptance");
+  await expect(history).toContainText("The receipt's Arc anchor and policy were independently confirmed");
+  await expect(history).toContainText("Remaining release scenarios are recorded in the acceptance checklist");
   await expect(history).not.toContainText("pending commercial price approval");
-  await expect(history.getByRole("link", { name: "Acceptance payment" })).toHaveAttribute("href", "https://explorer.arc.io/tx/0xaf1de665791e94a8f87f74e00edfdbf7f1cd56f8ec32bf98e0a57c36cbc73f33");
-  await expect(history.getByRole("link", { name: "Receipt anchor" })).toHaveAttribute("href", "https://explorer.arc.io/tx/0xeefdee7f01fd42a28546db8de2d0052f4b6a7711dd03684b6063b2b30ff33e5a");
+  await expect(history.getByRole("link", { name: "Acceptance payment ↗", exact: true })).toHaveAttribute("href", "https://explorer.arc.io/tx/0xaf1de665791e94a8f87f74e00edfdbf7f1cd56f8ec32bf98e0a57c36cbc73f33");
+  await expect(history.getByRole("link", { name: "Receipt anchor ↗", exact: true })).toHaveAttribute("href", "https://explorer.arc.io/tx/0xeefdee7f01fd42a28546db8de2d0052f4b6a7711dd03684b6063b2b30ff33e5a");
   await expect(page.locator(".deployment-badge")).toHaveText("STATUS UNAVAILABLE");
 });

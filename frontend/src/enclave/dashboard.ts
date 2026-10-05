@@ -80,6 +80,23 @@ export function mountDashboard(): () => void {
     finishLogin(attempt);
     attempt.controller.abort(reason);
   }
+  let updatingLoginPrompt = false;
+  function updateWalletLoginPrompt(): boolean {
+    if (activeLogin || walletToken || life.signal.aborted || updatingLoginPrompt) return false;
+    // assertActive can report an expired session through the wallet listener.
+    // That nested update must not overwrite the prompt for its replacement.
+    updatingLoginPrompt = true;
+    let wallet;
+    try { wallet = paymentWallet("sign-in"); } catch { /* A connection is required before signing in. */ }
+    finally { updatingLoginPrompt = false; }
+    if (life.signal.aborted || activeLogin || walletToken) return false;
+    const ready = wallet?.account.chainId === arc.chainId;
+    text("#wallet-login-status", ready
+      ? "Wallet connected. Sign in to load your workspace. Signing in is free."
+      : wallet ? "Switch your wallet to Arc Mainnet, then sign in. Signing in is free."
+        : "Connect your wallet on Arc Mainnet, then sign in. Signing in is free.");
+    return ready;
+  }
   function beginLogin(): LoginAttempt {
     const attempt: LoginAttempt = { controller: new AbortController() };
     activeLogin = attempt;
@@ -88,8 +105,8 @@ export function mountDashboard(): () => void {
       if (activeLogin !== attempt || life.signal.aborted) return;
       cancelLogin(new DOMException("Sign-in timed out", "TimeoutError"));
       clearWorkspace();
-      text("#connection-error", "No sign-in response was received. Open your wallet and try again. If no request appears, reconnect your wallet.");
-      text("#wallet-login-status", "Sign-in timed out. Reconnect your wallet, then sign in again.");
+      text("#connection-error", "Sign-in timed out. Reconnect your wallet on Arc Mainnet, then sign in again.");
+      text("#wallet-login-status", "Sign-in timed out. Reconnect your wallet on Arc Mainnet, then sign in again.");
     }, 60_000);
     return attempt;
   }
@@ -305,7 +322,7 @@ export function mountDashboard(): () => void {
     $("#connection-panel").classList.remove("connected"); $("#disconnect-gateway").hidden = true;
     $("#connection-status").dataset["connected"] = "false"; text("#connection-status", "Disconnected");
     text("#environment-badge", "NOT CONNECTED"); text("#environment-description", "Connect your gateway to load the workspace.");
-    text("#connection-note", "Your API key stays in this tab. Provider credentials stay on the server.");
+    text("#connection-note", "Sign in with your wallet or use an API key to load your workspace.");
     for (const id of ["#metric-calls", "#metric-receipts", "#receipt-count"]) text(id, "0");
     text("#metric-usage", "0.000000"); text("#payment-total", "0.000000 USDC");
     text("#inference-output", "Connect a workspace to send an encrypted request."); text("#output-status", "Not connected");
@@ -325,6 +342,7 @@ export function mountDashboard(): () => void {
     input("#prompt").value = ""; text("#prompt-count", "0 / 4,000"); text("#inference-error", "");
     for (let i = 0; i < 4; i++) step(i, "", "Waiting");
     setBusy(false);
+    updateWalletLoginPrompt();
   }
   function executePrepared(active: EnclaveClient, request: PreparedInference) {
     if (recovery?.quarantined) return;
@@ -392,7 +410,7 @@ export function mountDashboard(): () => void {
       const session = await resumeWallet(wallet, attempt.controller.signal);
       if (!current()) return;
       if (!session) {
-        text("#connection-status", "Disconnected"); text("#wallet-login-status", "Connect your wallet on Arc Mainnet, then sign in.");
+        text("#connection-status", "Disconnected");
         return;
       }
       walletToken = session.token;
@@ -403,10 +421,11 @@ export function mountDashboard(): () => void {
     } catch {
       if (current()) {
         if (walletToken) clearWorkspace();
-        text("#connection-status", "Disconnected"); text("#wallet-login-status", "Wallet login could not resume. Sign in to load your workspace.");
+        text("#connection-status", "Disconnected");
       }
     } finally {
       finishLogin(attempt);
+      updateWalletLoginPrompt();
     }
   }
   function applyWalletSession(expiresAt: string) {
@@ -426,8 +445,9 @@ export function mountDashboard(): () => void {
       cancelLogin();
       loginGeneration++;
       if (walletToken) clearWorkspace();
-      text("#wallet-login-status", "Wallet connection changed. Reconnect your wallet on Arc, then sign in again.");
-      text("#connection-error", "The sign-in request was cancelled because your wallet connection changed. You can reconnect and try again.");
+      const ready = updateWalletLoginPrompt();
+      text("#connection-error", ready ? "Sign-in cancelled because your wallet connection changed. Sign in again."
+        : "Sign-in cancelled because your wallet connection changed. Reconnect your wallet on Arc Mainnet, then sign in again.");
     }
     if (walletToken && reason === "connection") {
       const token = walletToken;
@@ -442,7 +462,10 @@ export function mountDashboard(): () => void {
     }
     loginGeneration++;
     if (walletToken) { clearWorkspace(); notify("Wallet changed or disconnected. Sign in again to load its workspace."); }
-    else void restoreLogin();
+    else {
+      if (updateWalletLoginPrompt() && reason === "connection") text("#connection-error", "");
+      void restoreLogin();
+    }
   });
   void walletLoginAvailable().then(available => { if (!life.signal.aborted) { $("#wallet-login-panel").hidden = !available; $<HTMLDetailsElement>("#operator-access").open = !available; } });
   void restoreLogin();
@@ -465,7 +488,7 @@ export function mountDashboard(): () => void {
       if (activeLogin === attempt && generation === loginGeneration && !life.signal.aborted) {
         clearWorkspace();
         text("#connection-error", error instanceof Error && error.name === "TimeoutError"
-          ? "Sign-in timed out. Open your wallet and try again. If no request appears, reconnect your wallet." : message(error));
+          ? "Sign-in timed out. Reconnect your wallet on Arc Mainnet, then sign in again." : message(error));
         text("#wallet-login-status", error instanceof WalletSessionUnavailableError ? "Reconnect your wallet on Arc, then sign in again." : "Sign-in was not completed. You can try again.");
       }
     }).finally(() => { finishLogin(attempt); });
@@ -488,6 +511,7 @@ export function mountDashboard(): () => void {
   on("#connection-form", "submit", (event) => {
     event.preventDefault(); cancelLogin(); loginGeneration++; clearTimeout(loginExpiry);
     if (walletToken) { void logoutWallet(walletToken).catch(() => {}); walletToken = null; }
+    updateWalletLoginPrompt();
     const version = ++connectionVersion;
     text("#connection-error", ""); $<HTMLButtonElement>("#connect-gateway").disabled = true;
     void connectWorkspace(input("#api-key").value.trim(), input("#gateway-url").value.trim(), version).catch((error: unknown) => { if (!life.signal.aborted) text("#connection-error", message(error)); }).finally(() => { if (!life.signal.aborted) $<HTMLButtonElement>("#connect-gateway").disabled = false; });

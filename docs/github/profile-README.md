@@ -32,11 +32,13 @@ operator EOA request passed strict GPU inference, a complete answer, signed
 receipt and **0.10 USDC** settlement/anchoring. Public backend and provider
 readiness were true at 10:05 UTC. Every new request still requires fresh
 verification. The approved price is **0.10 USDC per request**.
-Manual wallet acceptance is reopened after an OKX regression report; a real
-retest is still pending. The earlier owner confirmation
-on 3 October 2026 remains in the
+On **5 October 2026**, the owner reported one successful paid wallet request,
+including a correct answer and independent receipt/Arc-anchor checks. Fixes for
+old OKX sessions, login messages and browser CI are implemented and passed
+local validation. A GitHub browser rerun and manual recovery checks remain
+pending. The earlier owner confirmation on 3 October remains in the
 [acceptance history](https://github.com/nerdenpad/enclave-developer/blob/main/docs/release-progress.md#manual-wallet-regression--3-october-2026).
-The full E1 launch remains open pending that retest and live operational acceptance.
+The full E1 launch remains open pending recovery regression checks and live operational acceptance.
 
 What is live and what is still open is published in the
 [roadmap](https://github.com/nerdenpad/enclave-developer/blob/main/docs/roadmap.md).

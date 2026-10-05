@@ -1,6 +1,6 @@
 # Roadmap
 
-Status reviewed on 4 October 2026. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. A fresh operator EOA call passed complete response, 0.10 USDC settlement, receipt and confirmed anchor; public backend and provider readiness were true at 10:05 UTC. Web QA fixes were deployed on 3 October; a physical OKX retest and E1 operational acceptance remain open. Milestones describe delivery and acceptance evidence, not estimated launch dates.
+Status reviewed on 5 October 2026. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. Operator acceptance passed on 4 October. The owner now reports one successful 0.10 USDC wallet request, a correct answer and independent receipt/Arc-anchor checks. Fixes for old-session recovery, login messages and browser CI are implemented and passed local validation; a GitHub browser rerun, manual recovery checks and E1 operational acceptance remain open. Milestones describe delivery and acceptance evidence, not estimated launch dates.
 
 | Milestone | Status | Completion evidence |
 | --- | --- | --- |
@@ -10,9 +10,9 @@ Status reviewed on 4 October 2026. Reviewed provider policy v6 and its accepted 
 | Deployment transparency | Implemented | Public `/status` page with configured network, model, policy and limits |
 | Hosted inference acceptance | Passed under policy v6 on 4 October | Fresh CPU/GPU, exact reviewed workload, TLS and provider signature checks; complete `READY` response; bounded attestation-only candidate admission |
 | Public-chain settlement | Accepted | Arc `5042`, real USDC, four accepted calls totalling 0.40 USDC; confirmed settlements and receipt anchors |
-| Wallet connections | Retest pending | WalletConnect operator protocol/browser journey passed on 1 October; web fixes deployed on 3 October; manual acceptance reopened after an OKX failure report; earlier 3 October owner confirmation retained in [release progress](release-progress.md#manual-wallet-regression--3-october-2026) |
+| Wallet connections | One owner-reported paid pass; recovery fixes locally validated | Owner reports a successful paid wallet journey on 5 October; recovery/login fixes passed local validation and still need manual recovery checks; historical evidence is retained in [release progress](release-progress.md) |
 | Production user access | Implemented | Wallet sign-in, scoped sessions, owner history and authenticated receipt export |
-| E1 operational acceptance | Open | Real manual OKX retest, live settlement interruption/recovery, signer rotation and model revocation; see [E1 acceptance](e1-release.md) |
+| E1 operational acceptance | Open | Old-session recovery regression, browser CI, live settlement interruption/recovery, signer rotation and model revocation; see [E1 acceptance](e1-release.md) |
 
 ## Released product features
 

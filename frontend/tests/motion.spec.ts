@@ -36,6 +36,36 @@ test("published modules hydrate the page and start the original hero video", asy
   expect(await video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false);
 });
 
+test("replayed page effects share a pending decoration load and initialize it once", async ({ page }) => {
+  let releaseScript!: () => void;
+  const gate = new Promise<void>(resolve => { releaseScript = resolve; });
+  let downloads = 0;
+  await page.route("**/api/**", route => route.fulfill({ status: 503, json: { title: "UNAVAILABLE" } }));
+  await page.route(/\/site\.js(?:\?|$)/, async route => {
+    downloads += 1;
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response, body: `window.enclaveDecorationExecutions = (window.enclaveDecorationExecutions || 0) + 1;\n${await response.text()}` });
+  });
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => downloads).toBe(1);
+    await expect(page.locator('script[src^="/site.js"]')).toHaveCount(1);
+  } finally {
+    releaseScript();
+  }
+  await expect(page.locator("main h1.heading-motion")).toHaveCount(1);
+  expect(await page.evaluate(() => Reflect.get(window, "enclaveDecorationExecutions"))).toBe(1);
+  const decoratedCards = await page.locator(".pain-reveal").count();
+  expect(decoratedCards).toBeGreaterThan(0);
+  await expect(page.locator(".pain-reveal > .glitch-layer-1")).toHaveCount(decoratedCards);
+  await page.reload();
+  await expect(page.locator("main h1.heading-motion")).toHaveCount(1);
+  await expect(page.locator('script[src^="/site.js"]')).toHaveCount(1);
+  expect(downloads).toBe(2);
+  expect(await page.evaluate(() => Reflect.get(window, "enclaveDecorationExecutions"))).toBe(1);
+});
+
 test("scroll triggers change real heading, image and comparison animation states", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.setViewportSize({ width: 1440, height: 900 });

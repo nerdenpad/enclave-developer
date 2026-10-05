@@ -129,6 +129,58 @@ describe("browser wallet lifecycle", () => {
   });
 });
 describe("WalletConnect lifecycle", () => {
+  it.each(["missing", "expired"])("retires a peer-rejected %s topic without waiting for cleanup or replaying its signature", async cause => {
+    const { mock, changed, connection } = await approvedWallet(), cleanup = deferred<void>();
+    const unrelated = arcSession("unrelated-topic"); mock.sessions.set(unrelated.topic, unrelated);
+    mock.disconnect.mockImplementation(({ topic }: { topic: string }) => cleanup.promise.then(() => { mock.sessions.delete(topic); }));
+    mock.request.mockRejectedValueOnce(Error(cause === "missing" ? "There is no existing session matching the topic" : "Wallet session expired"));
+    changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: cause });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.request).toHaveBeenCalledTimes(1);
+    expect(mock.disconnect).toHaveBeenCalledExactlyOnceWith({ topic: "topic", reason: { code: 6000, message: "User disconnected" } });
+    expect(() => connection.assertActive?.()).toThrow(WalletSessionUnavailableError);
+    // The connection was already invalidated, but an explicit disconnect still
+    // joins the same retirement instead of returning with a stored stale topic.
+    const firstDisconnect = connection.disconnect(), secondDisconnect = connection.disconnect();
+    expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    cleanup.resolve(); await Promise.all([firstDisconnect, secondDisconnect]);
+    expect(mock.sessions.has("topic")).toBe(false); expect(mock.sessions.get("unrelated-topic")).toBe(unrelated);
+    expect(changed).toHaveBeenCalledTimes(1); expect(mock.request).toHaveBeenCalledTimes(1);
+  });
+  it("retires a silently expired SDK session before another wallet signature", async () => {
+    const { mock, changed, live, connection } = await approvedWallet();
+    mock.disconnect.mockImplementation(async ({ topic }: { topic: string }) => { mock.sessions.delete(topic); });
+    live.expiry = 1; changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ reason: "expired" });
+    await connection.disconnect();
+    expect(mock.disconnect).toHaveBeenCalledExactlyOnceWith({ topic: "topic", reason: { code: 6000, message: "User disconnected" } });
+    expect(mock.sessions.has("topic")).toBe(false); expect(mock.request).not.toHaveBeenCalled();
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null);
+  });
+  it.each(["resolve", "reject"])("keeps a replacement session active when retirement of its previous topic completes with %s", async outcome => {
+    const { mock, changed, connection } = await approvedWallet(), cleanup = deferred<void>();
+    mock.disconnect.mockImplementation(({ topic }: { topic: string }) => cleanup.promise.then(() => { mock.sessions.delete(topic); }));
+    mock.request.mockRejectedValueOnce(Error("There is no existing session matching the topic")); changed.mockClear();
+    await expect(connection.authorizeArc(intent())).rejects.toThrow(WalletSessionUnavailableError);
+    const replacement = arcSession("replacement-topic"), replacementChanged = vi.fn(); mock.sessions.set(replacement.topic, replacement);
+    const current = await connectWalletConnect("a".repeat(32), 5042, new AbortController().signal, vi.fn(), replacementChanged,
+      mock.getClient, { topic: replacement.topic, address: signer.address });
+    replacementChanged.mockClear(); const previousNotifications = changed.mock.calls.length;
+    if (outcome === "resolve") cleanup.resolve(); else cleanup.reject(Error("Old topic is no longer present in the SDK"));
+    await connection.disconnect();
+    expect(current.account.address).toBe(signer.address); expect(() => current.assertActive?.()).not.toThrow();
+    expect(mock.sessions.get("replacement-topic")).toBe(replacement); expect(replacementChanged).not.toHaveBeenCalled();
+    expect(changed).toHaveBeenCalledTimes(previousNotifications); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.request).toHaveBeenCalledTimes(1); current.detach?.();
+  });
+  it("retires a deleted topic once even if the user disconnects it after the protocol event", async () => {
+    const { mock, changed, connection } = await approvedWallet(); changed.mockClear();
+    mock.disconnect.mockRejectedValueOnce(Error("No matching key. session topic doesn't exist: topic"));
+    mock.listeners.get("session_delete")?.({ topic: "topic" });
+    await Promise.all([connection.disconnect(), connection.disconnect()]);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.request).not.toHaveBeenCalled(); expect(mock.listeners.size).toBe(0);
+  });
   it("invalidates a session lost after successful login before requesting payment approval", async () => {
     vi.stubGlobal("location", { origin: "https://enclaveagent.tech" });
     const { mock, changed, connection } = await approvedWallet(), message = loginMessage();
@@ -492,4 +544,3 @@ describe("bounded wallet sign-in approval", () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 });
-

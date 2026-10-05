@@ -1,4 +1,31 @@
-# Release progress — 4 October 2026
+# Release progress — 5 October 2026
+
+## Owner-reported paid wallet retest — 5 October 2026
+
+The project owner reports that one **0.10 USDC** request completed successfully:
+payment, a correct model answer, a signed receipt and an Arc anchor. The receipt
+signature and anchor were independently checked during that retest. The report
+does not establish that every website or wallet scenario passes.
+
+Fixes for stale OKX sessions, outdated login messages and browser CI failures
+are implemented. Combined local validation passed frontend TypeScript,
+**281 unit tests**, **49 default browser scenarios** and **18 checkout fixture
+scenarios**: **67 browser scenarios** in total. Browser tests use fixtures and
+do not establish live wallet or payment acceptance. No tests were skipped and
+the CI workflow was not changed. A GitHub browser rerun, manual old-session
+recovery and the remaining E1 operational checks are still pending. No transaction or receipt
+identifier was supplied with the successful request report, so it is recorded
+separately from the four operator calls and 0.40 USDC of retained transaction
+evidence below.
+
+The [GitHub run for commit `abdb239`](https://github.com/nerdenpad/enclave-developer/actions/runs/37227524444)
+passed backend checks, frontend typechecking, 275 frontend unit tests and the
+build. Its browser job passed 42 scenarios and
+failed five: one obsolete status-history assertion and four animation checks
+that detected duplicate `site.js` elements. Its three sign-in recovery scenarios
+passed. The fixes retain these checks; a successful CI rerun is not yet recorded.
+
+## Operator acceptance — 4 October 2026
 
 The backend runs with `NODE_ENV=production`, reviewed provider policy v6 and its
 new accepted NEAR + Arc release manifest. A fresh operator EOA request passed

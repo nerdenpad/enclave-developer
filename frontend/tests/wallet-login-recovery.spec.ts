@@ -117,7 +117,11 @@ test("hung sign-in can disconnect and reconnect without a late signature revivin
   await expect(disconnect).toBeEnabled(); await disconnect.click();
   await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeEnabled();
   await expect(page.locator("#wallet-login")).toBeEnabled();
-  await f.connect(); await f.beginSignature(1);
+  await expect(page.locator("#wallet-login-status")).toHaveText("Connect your wallet on Arc Mainnet, then sign in. Signing in is free.");
+  await f.connect();
+  await expect(page.locator("#wallet-login-status")).toHaveText("Wallet connected. Sign in to load your workspace. Signing in is free.");
+  await expect(page.locator("#connection-error")).toBeEmpty();
+  await f.beginSignature(1);
   // The old promise settles while the replacement attempt is still awaiting approval.
   await f.approve(0);
   await page.clock.runFor(25);
@@ -136,9 +140,12 @@ test("timed-out sign-in allows a fresh attempt and ignores the original wallet r
   await page.clock.fastForward(60_001);
   await expect(page.locator("#wallet-login")).toBeEnabled();
   await expect(page.locator("#connection-status")).not.toContainText("Connected ·");
+  await expect(page.locator("#wallet-login-status")).toHaveText("Sign-in timed out. Reconnect your wallet on Arc Mainnet, then sign in again.");
   expect(f.requests.filter(request => request.path === "/v1/auth/wallet/verify")).toHaveLength(0);
   await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeEnabled();
   await f.connect();
+  await expect(page.locator("#wallet-login-status")).toHaveText("Wallet connected. Sign in to load your workspace. Signing in is free.");
+  await expect(page.locator("#connection-error")).toBeEmpty();
   await f.beginSignature(1); await f.approve(0); await page.clock.runFor(25);
   await expect(page.locator("#wallet-login")).toBeDisabled();
   expect(f.requests.filter(request => request.path === "/v1/auth/wallet/verify")).toHaveLength(0);
@@ -152,6 +159,7 @@ test("an expired login in a long-open tab can cancel a hung new signature and si
   await page.clock.fastForward(1_800_001);
   await expect(page.locator("#connection-status")).toHaveText("Disconnected");
   await expect(page.locator("#wallet-login")).toBeEnabled();
+  await expect(page.locator("#wallet-login-status")).toHaveText("Wallet connected. Sign in to load your workspace. Signing in is free.");
   await f.beginSignature(1);
   await page.locator(".wallet-control").getByRole("button", { name: "Disconnect wallet", exact: true }).click();
   await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeEnabled();
@@ -161,4 +169,19 @@ test("an expired login in a long-open tab can cancel a hung new signature and si
   const verified = f.requests.filter(request => request.path === "/v1/auth/wallet/verify");
   expect(verified.map(request => request.body?.id)).toEqual(["1".padStart(48, "0"), "3".padStart(48, "0")]);
   await expect(page.locator("#connection-status")).toContainText("Connected ·"); f.assertNoPayments();
+});
+
+test("disconnecting a wallet workspace resets signed-in copy without disconnecting its wallet", async ({ page }) => {
+  const f = await loginFixture(page); await f.connect(); await f.beginSignature(0); await f.approve(0);
+  await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  await expect(page.locator("#wallet-login-status")).toHaveText("Signed in. Payments are confirmed separately in your wallet.");
+  await page.locator("#disconnect-gateway").click();
+  await expect(page.locator("#connection-status")).toHaveText("Disconnected");
+  await expect(page.locator(".wallet-network")).toHaveText("Login recovery fixture · Arc Mainnet");
+  await expect(page.locator("#wallet-login-status")).toHaveText("Wallet connected. Sign in to load your workspace. Signing in is free.");
+  await expect(page.locator("#connection-note")).toHaveText("Sign in with your wallet or use an API key to load your workspace.");
+  await expect(page.locator("#wallet-login")).toBeEnabled();
+  await f.beginSignature(1); await f.approve(1);
+  await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  f.assertNoPayments();
 });

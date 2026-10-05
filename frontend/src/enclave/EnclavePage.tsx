@@ -41,15 +41,34 @@ export function headForPath(pathname: string) {
   };
 }
 
-const loadScript = (src: string) =>
-  new Promise<void>((resolve, reject) => {
+// Replayed effects share one load for the same rendered page, including while
+// the download is pending. A new HTML tree gets its own initialization.
+const pageScriptLoads = new WeakMap<Node, Map<string, Promise<void>>>();
+const loadScript = (src: string) => {
+  const page = document.getElementById("site-document")?.firstChild ?? document.body;
+  const loads = pageScriptLoads.get(page) ?? new Map<string, Promise<void>>();
+  pageScriptLoads.set(page, loads);
+  const existing = loads.get(src);
+  if (existing) return existing;
+  const promise = new Promise<void>((resolve, reject) => {
     const script = document.createElement("script");
     script.src = src;
     script.async = false;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Unable to load ${src}`));
+    script.onload = () => {
+      script.onload = script.onerror = null;
+      resolve();
+    };
+    script.onerror = () => {
+      script.onload = script.onerror = null;
+      script.remove();
+      loads.delete(src);
+      reject(new Error(`Unable to load ${src}`));
+    };
     document.body.append(script);
   });
+  loads.set(src, promise);
+  return promise;
+};
 
 export function EnclavePage({ pathname }: { pathname: string }) {
   const path = normalizePath(pathname);
