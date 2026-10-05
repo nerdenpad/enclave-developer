@@ -29,13 +29,13 @@ flowchart LR
 
 ## Trust boundaries
 
-**Browser to gateway.** Request encryption terminates at the application gateway. NEAR evidence describes the remote model execution path, not this application process.
+**Browser to gateway.** Request encryption terminates at the application gateway, which decrypts requests before forwarding them. Gateway keys are software-managed; remote NEAR evidence does not isolate this process from its operator.
 
 **Gateway to provider.** The NEAR adapter verifies remote CPU/GPU evidence and the provider connection against an operator-reviewed policy. This evidence describes the remote model deployment. Unavailable verification or rejected evidence stops the request; it does not select an unverified fallback.
 
 **Receipt to chain.** A valid signature establishes that the configured signer signed the receipt. It does not by itself prove the signer ran in a TEE. The optional chain check evaluates the selected contract, model policy and anchor at the displayed block. Trusted signer and contract settings must come from an independently approved deployment record.
 
-**Payments.** The hosted deployment is configured for real USDC on Arc Mainnet, chain 5042, at the approved price of 0.10 USDC per request. A fresh operator EOA request passed settlement, complete model response, receipt and confirmed anchor under reviewed provider policy v6 on 4 October 2026. Wallet sign-in and payment authorization are separate signatures. Durable payment and inference journals prevent repeating an ambiguous execution. The local development launcher uses test funds on Anvil; its records remain separate from Arc. NEAR provider credits are billed separately from customer settlement.
+**Payments.** The hosted deployment is configured for real USDC on Arc Mainnet, chain 5042, at the approved price of 0.10 USDC per request. A fresh operator EOA request passed settlement, complete model response, receipt and confirmed anchor under reviewed provider policy v6 on 4 October 2026. Wallet sign-in and payment authorization are separate signatures. Arc payment amounts and addresses are public. Shielded transfers and the hosted sealed-agent runtime are not enabled. Durable payment and inference journals prevent repeating an ambiguous execution. The local development launcher uses test funds on Anvil; its records remain separate from Arc. NEAR provider credits are billed separately from customer settlement.
 
 ## Production release
 

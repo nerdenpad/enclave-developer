@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const runtime = vi.hoisted(() => ({
   config: { LOG_LEVEL: "silent", DATABASE_URL: "postgres://test-only/api", REDIS_URL: "redis://test-only:6379", API_HOST: "127.0.0.1", API_PORT: 8787,
     INFERENCE_TIMEOUT_MS: 30_000, PAYMENT_MODE: "mock", ARC_CHAIN_ID: 31337, AGENT_RUNTIME_ENABLED: false,
+    WALLET_AUTH_ORIGIN: "", WALLET_AUTH_TRUSTED_PROXY_IPS: ["127.0.0.1"],
     AGENT_RUNTIME_POLL_MS: 1000, AGENT_RUNTIME_MAX_STEPS: 8, AGENT_RUNTIME_MAX_BUDGET_UNITS: 1_000_000, AGENT_RUNTIME_MAX_DURATION_MS: 900_000 },
-  db: {}, sql: { end: vi.fn() }, queue: { on: vi.fn(), close: vi.fn() },
+  db: {}, sql: { end: vi.fn() }, redis: { status: "ready", defineCommand: vi.fn(), runCommand: vi.fn() }, queue: { on: vi.fn(), close: vi.fn(), client: Promise.resolve<unknown>(undefined) },
   queueFactory: vi.fn(), log: { info: vi.fn(), error: vi.fn() },
   boot: vi.fn(), gateway: { reconcilePayments: vi.fn() }, fetch: vi.fn(), app: vi.fn(), serve: vi.fn(), server: { close: vi.fn() },
   agentFactory: vi.fn(), storeFactory: vi.fn(), agent: { runNext: vi.fn() }, agentStore: {}, hostSecret: Buffer.alloc(32, 17),
@@ -32,6 +33,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   runtime.boot.mockResolvedValue(runtime.gateway);
   runtime.config.AGENT_RUNTIME_ENABLED = false;
+  runtime.config.WALLET_AUTH_ORIGIN = "";
+  runtime.redis.runCommand.mockResolvedValue(0);
+  runtime.queue.client = Promise.resolve(runtime.redis);
   runtime.agent.runNext.mockResolvedValue(undefined);
   runtime.gateway.reconcilePayments.mockResolvedValue(0);
   runtime.app.mockReturnValue({ fetch: runtime.fetch });
@@ -53,6 +57,18 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe("API process lifecycle", () => {
+  it("reuses the existing receipt Redis client for wallet quotas and does not create another connection", async () => {
+    runtime.config.WALLET_AUTH_ORIGIN = "https://enclaveagent.tech";
+    await import("./index.js");
+    const { WalletLogin } = await import("./wallet-auth.js");
+    const login: unknown = runtime.app.mock.calls[0]?.[3];
+    expect(login).toBeInstanceOf(WalletLogin);
+    if (!(login instanceof WalletLogin)) throw Error("Expected wallet login wiring");
+    await login.limit("203.0.113.10", "challenge");
+    expect(runtime.queueFactory).toHaveBeenCalledTimes(1);
+    expect(runtime.redis.defineCommand).toHaveBeenCalledExactlyOnceWith("enclaveWalletLoginQuotaV1", { numberOfKeys: 1, lua: expect.any(String) });
+    expect(runtime.redis.runCommand).toHaveBeenCalledExactlyOnceWith("enclaveWalletLoginQuotaV1", [expect.stringMatching(/^enclave:wallet-login:v1:/), 60_000, 30]);
+  });
   it("boots the gateway and HTTP server with the receipt queue and handles Redis errors", async () => {
     await import("./index.js");
     expect(runtime.queueFactory).toHaveBeenCalledWith("receipt-anchorer", { connection: { url: runtime.config.REDIS_URL } });

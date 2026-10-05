@@ -1,0 +1,46 @@
+rules:
+  - id: enclave-node-tls-verification-disabled
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Keep TLS certificate verification enabled.
+    pattern-either:
+      - pattern: '{..., rejectUnauthorized: false, ...}'
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+  - id: enclave-dynamic-code-execution
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Avoid evaluating code supplied at runtime.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+  - id: enclave-shell-process-enabled
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Pass an executable and an argument array without enabling a shell.
+    patterns:
+      - pattern: '$CALL(..., { ..., shell: true, ... }, ...)'
+      - metavariable-regex:
+          metavariable: $CALL
+          regex: '(^|.*\.)(spawn|spawnSync|execFile|execFileSync)$'
+  - id: enclave-python-tls-verification-disabled
+    languages: [python]
+    severity: ERROR
+    message: Keep HTTPS verification enabled.
+    pattern-either:
+      - pattern: $REQUEST(..., verify=False, ...)
+      - pattern: $CONTEXT.verify_mode = ssl.CERT_NONE
+      - pattern: ssl._create_unverified_context(...)
+  - id: enclave-python-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: Use a safe data format for untrusted input.
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: yaml.load($INPUT)
+      - pattern: yaml.load(..., Loader=yaml.Loader, ...)
+  - id: enclave-python-shell-process-enabled
+    languages: [python]
+    severity: ERROR
+    message: Pass an executable and an argument array without enabling a shell.
+    pattern: subprocess.$CALL(..., shell=True, ...)

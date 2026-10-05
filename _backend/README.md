@@ -25,9 +25,10 @@ infra/near      Intel/NVIDIA verifier, reviewed development policies and crypto 
 
 ## Run locally
 
-Use Node.js 22 or newer, npm and a running Docker engine. Run commands from the repository root. The example below uses PowerShell; on a Unix shell use `cp .env.example .env` instead of `Copy-Item`.
+Use Node.js 22 or newer, npm and a running Docker engine. Run these standalone backend commands from `_backend` (`cd _backend` from the combined repository root). The example below uses PowerShell; on a Unix shell use `cp .env.example .env` instead of `Copy-Item`.
 
 ```powershell
+cd _backend
 Copy-Item .env.example .env
 npm ci
 docker compose up -d postgres redis anvil

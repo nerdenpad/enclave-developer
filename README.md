@@ -38,6 +38,8 @@ verification and payment status are checked separately on the
 |---|---|
 | Site | [enclaveagent.tech](https://enclaveagent.tech) |
 | Milestones | [Roadmap](docs/roadmap.md) |
+| Security | [Reporting vulnerabilities](SECURITY.md) |
+| Audit follow-up | [Fixes, evidence and remaining work](docs/audit-followup.md) |
 | Dashboard | [enclaveagent.tech/dashboard](https://enclaveagent.tech/dashboard) |
 | Verify a receipt | [enclaveagent.tech/verify](https://enclaveagent.tech/verify) |
 | Deployment status | [enclaveagent.tech/status](https://enclaveagent.tech/status) |
@@ -72,15 +74,18 @@ for Arc settlement or a completed hosted inference.
 
 ## Development
 
-Requires Node.js 22.12+ and a running Docker engine.
+Requires Node.js 22.12+ (or Node.js 24), npm, Docker and Compose v2. Start the local Docker engine before running the project.
 
 ```sh
 npm run setup
+node scripts/enclave.mjs check
 npm run dev
 ```
 
 Open `http://127.0.0.1:5173/dashboard/`. Use `/api` as the gateway URL and the private
 `DEMO_API_KEY` generated in `_backend/.env.demo`. The browser holds this key in memory.
+
+The `check` command diagnoses prerequisites without starting services or contacting an inference provider.
 
 A clean checkout starts with a local echo provider and test payments. Startup does not
 make a paid inference request. See the [development guide](docs/development.md) for NEAR,

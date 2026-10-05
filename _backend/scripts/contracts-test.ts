@@ -13,7 +13,8 @@ const command = native.status === 0 ? "forge" : "docker";
 const commandArgs = native.status === 0 ? args : [
   "run", "--rm", "--entrypoint", "forge",
   "--mount", `type=bind,source=${contracts},target=/work`,
-  "--workdir", "/work", "ghcr.io/foundry-rs/foundry:latest", ...args,
+  "--workdir", "/work",
+  "ghcr.io/foundry-rs/foundry:v1.8.1@sha256:0c00cb0bda1ab1b91c9a6bf60f4c76c09c1a8870824b6d4718afbabacf6f9a17", ...args,
 ];
 const result = spawnSync(command, commandArgs, { cwd: contracts, stdio: "inherit" });
 if (result.error) {

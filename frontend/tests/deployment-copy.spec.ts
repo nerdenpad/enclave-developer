@@ -76,3 +76,27 @@ test("status history preserves reviewed acceptance and the approved price when l
   await expect(history.getByRole("link", { name: "Receipt anchor ↗", exact: true })).toHaveAttribute("href", "https://explorer.arc.io/tx/0xeefdee7f01fd42a28546db8de2d0052f4b6a7711dd03684b6063b2b30ff33e5a");
   await expect(page.locator(".deployment-badge")).toHaveText("STATUS UNAVAILABLE");
 });
+
+test("public pages distinguish released payments and remote evidence from planned privacy features", async ({ page, baseURL }) => {
+  test.setTimeout(60_000);
+  const origin = new URL(baseURL!).origin;
+  await page.route("**/*", route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== origin) return route.abort();
+    if (url.pathname.startsWith("/api/")) return route.fulfill({ status: 503, json: { title: "UNAVAILABLE" } });
+    return route.continue();
+  });
+  const boundaries = [
+    ["/", ["The application gateway decrypts", "Payment amounts and addresses are public", "Shielded transfers and Nanopayments are roadmap features"]],
+    ["/architecture/", ["Arc payment amounts and addresses are public", "Shielded transfers and sealed agents remain roadmap features"]],
+    ["/technology/sealed-agents/", ["A planned runtime", "hosted autonomous-agent runtime is disabled", "Amounts and addresses are public"]],
+    ["/insights/private-agent-commerce/", ["Arc settlements currently expose payment amounts and addresses", "Shielded transfers are a roadmap feature"]],
+    ["/legal/privacy-policy/", ["application gateway decrypts requests", "software-managed keys", "does not isolate the gateway from its operator"]],
+    ["/legal/risk-disclosure/", ["software-managed keys", "Current Arc payments have public amounts and addresses", "Shielded transfers are not enabled"]],
+  ] as const;
+  for (const [path, statements] of boundaries) {
+    await page.goto(path);
+    for (const statement of statements) await expect(page.locator("#site-document")).toContainText(statement);
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", /authorized USDC payments/);
+  }
+});

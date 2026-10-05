@@ -2,8 +2,14 @@ import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { parseEnv } from "node:util";
 import net from "node:net";
-if (!existsSync("_backend/.env.demo")) throw new Error("Run npm run demo:prepare first. This check uses a prepared local demo and never sends an inference request.");
-const service = spawn(process.execPath, ["scripts/enclave.mjs", "dev"], { stdio: ["ignore", "pipe", "pipe", "ipc"], windowsHide: true });
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = fileURLToPath(new URL("../", import.meta.url));
+const args = process.argv.slice(2);
+if (args.length) throw new Error("This integration check starts local services. For offline checks use node --test tests/launch-preflight.test.mjs.");
+const profilePath = path.join(root, "_backend", ".env.demo");
+if (!existsSync(profilePath)) throw new Error("Run npm run demo:prepare from the repository root first. This check starts prepared local services and never sends an inference request.");
+const service = spawn(process.execPath, [path.join(root, "scripts", "enclave.mjs"), "dev"], { cwd: root, stdio: ["ignore", "pipe", "pipe", "ipc"], windowsHide: true });
 let output = "";
 let closed = false;
 let code;
@@ -21,7 +27,7 @@ const isClosed = (port) => new Promise((resolve) => {
 try {
   for (let count = 0; count < 240 && !output.includes("Enclave is ready:") && !closed; count++) await pause(500);
   if (!output.includes("Enclave is ready:") || closed) throw new Error(`Launcher did not become ready (exit ${code ?? "pending"}; api=${output.includes("api_listen")}, frontend=${output.includes("VITE")}, worker=${output.includes("worker_listen")}).`);
-  const env = parseEnv(readFileSync("_backend/.env.demo", "utf8"));
+  const env = parseEnv(readFileSync(profilePath, "utf8"));
   const health = await (await fetch("http://127.0.0.1:5173/api/health")).json();
   const workspaceResponse = await fetch("http://127.0.0.1:5173/api/v1/workspace", { headers: { "x-api-key": env.DEMO_API_KEY } });
   if (!workspaceResponse.ok || health.inferenceBackend !== env.INFERENCE_BACKEND || health.chainId !== 31337 || !output.includes("worker_listen")) throw new Error("Combined services did not pass read-only checks.");

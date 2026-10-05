@@ -1,0 +1,7 @@
+title = "Enclave secret scanning"
+
+[extend]
+useDefault = true
+
+# History is scanned in full. No directory, test, commit or rule-wide exclusions.
+# Reviewed historical fixture findings use exact fingerprints in gitleaksignore.

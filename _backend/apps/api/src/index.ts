@@ -1,5 +1,5 @@
 import { config as loadDotenv } from "dotenv";
-import { WalletLogin, PostgresWalletLoginStore } from "./wallet-auth.js";
+import { WalletLogin, PostgresWalletLoginStore, RedisWalletLoginLimiter } from "./wallet-auth.js";
 import { serve } from "@hono/node-server";
 import { Queue } from "bullmq";
 import { createDb } from "@enclave/db";
@@ -35,7 +35,10 @@ const agentRuntime = new AgentRuntime({
 const agentRunner = config.AGENT_RUNTIME_ENABLED
   ? startReconciliation(() => agentRuntime.runNext(), () => log.error("agent_runtime_tick_failed"), config.AGENT_RUNTIME_POLL_MS)
   : undefined;
-const walletLogin = config.WALLET_AUTH_ORIGIN ? new WalletLogin(config.WALLET_AUTH_ORIGIN, new PostgresWalletLoginStore(sql)) : undefined;
+const walletLogin = config.WALLET_AUTH_ORIGIN ? new WalletLogin(config.WALLET_AUTH_ORIGIN, new PostgresWalletLoginStore(sql), {
+  trustedProxyIps: config.WALLET_AUTH_TRUSTED_PROXY_IPS,
+  limiter: new RedisWalletLoginLimiter(await receiptAnchorer.client),
+}) : undefined;
 const app = createApp(gateway, log, agentRuntime, walletLogin);
 
 const server = serve({ fetch: app.fetch, hostname: config.API_HOST, port: config.API_PORT }, (info) => {

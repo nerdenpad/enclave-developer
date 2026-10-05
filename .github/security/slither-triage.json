@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "accepted": [
+    {
+      "fingerprint": "f771e410388e17bfd0ffdf0ec84330531b833977379fc0a0231a40a4eb4d37cb",
+      "check": "arbitrary-send-erc20",
+      "impact": "High",
+      "sourceHashes": {
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "The allowance-funded branch is reachable only after _settle requires msg.sender == payer. Signed relayer paths receive the exact authorized funds first and use the funded branch, which transfers meter-owned funds rather than calling an arbitrary payer transferFrom. Payer, route, amount and replay guards are bound by this source.",
+      "tests": [
+        "_backend/contracts/test/PaymentsAndMandates.t.sol#testStrangerCannotDrainApprovedPayerAllowance",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testAuthorizedPaymentRejectsRelayerRoutingSubstitution",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSignedPaymentReplayAndMalformedSignatureRejected"
+      ]
+    },
+    {
+      "fingerprint": "1fa11775ed591889da8c2d37de605726d2ece22479fd7813e8f447f4239c7a60",
+      "check": "divide-before-multiply",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/FeeVault.sol": "b244ac6faa7856c83a371f0bed5b19d0458247a9ff2ea665fc228a791018c63b"
+      },
+      "rationale": "The split intentionally floors the 80/10/5 shares before computing a reserve from the treasury share. The remainder goes to the ecosystem, so all distributable units are conserved and the separately reserved balance cannot be distributed again.",
+      "tests": [
+        "_backend/contracts/test/PaymentsAndMandates.t.sol#testFuzzVaultSplitDistributesEntireBalanceIncludingDust",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testBuybackReserveIsOnlyTenPercentOfTreasuryAndNeverRedistributed"
+      ]
+    },
+    {
+      "fingerprint": "e6c70fc6ca0d15d7e6d0f813c5751e7809177ec3f20cab51918f09cd1f85bdc1",
+      "check": "divide-before-multiply",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/ModelRegistry.sol": "526d840d26136f765e64f02d711645bb1602ce5fd816987c64211ae31472f18d",
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "The quotient plus remainder expression computes floor(amount * bps / 10000) exactly while avoiding a full-width multiplication. Registry bounds bps to 10000; subtracting that share from amount conserves the payment, including zero and full-provider rates.",
+      "tests": [
+        "_backend/contracts/test/AtomicSettlement.t.sol#testZeroAndFullProviderRatesConservePayment",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testModelPaymentPaysRegisteredProviderAndRecordsActualVolume"
+      ]
+    },
+    {
+      "fingerprint": "b975b69539a0e6826d38803bf6cd2cb6971c667a56316c5057b88cde8f8c452d",
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "Equality checks a measured pre/post transfer balance delta against the signed amount, not the meter absolute balance. Preexisting donations cancel from the delta; rejecting partial or fee-on-transfer receipt is intentional and rolls back settlement.",
+      "tests": [
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSignedPayerUSDCSettlesWithoutMintingOrAllowance",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testAuthorizationRollsBackWhenMandateRejects"
+      ]
+    },
+    {
+      "fingerprint": "7f0b47fa2c0df6b0db93a524e285d470191327c3689f7134aa25d5e54e8b0c29",
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/InsuranceStaking.sol": "fa971de1b41a3bbfb83a6d93ade32471200c2128cd576d99187b4099d22487ad"
+      },
+      "rationale": "The zero check is an early return on newly received funds, calculated after verifying balance is not below accounted funds. It does not gate a target absolute balance or prevent later deposits from being accrued; rewards use the measured deposit.",
+      "tests": [
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testRewardsAreProportionalToActualStakeAndClaimedOnce",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testLateStakeCannotStealAlreadyReceivedFees",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testFuzzRewardClaimsNeverExceedMeasuredDeposits"
+      ]
+    },
+    {
+      "fingerprint": "9a4dfcc9c2ad4cf5ca22ea84276011c5c0d0b7bcb35b4ac9a2daa6b19dc4dd5b",
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/FeeVault.sol": "b244ac6faa7856c83a371f0bed5b19d0458247a9ff2ea665fc228a791018c63b"
+      },
+      "rationale": "Equality enforces the exact measured input spend after a bounded swap. Preexisting balance cancels in the delta. Measured recipient output and minimum output protect execution independently of an untrusted router return value; any failure rolls back the reserve.",
+      "tests": [
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testBuybackUsesConfiguredRouterAndMeasuredOutputAndClearsAllowance",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testLyingRouterCannotClaimExecutionWithoutSpendingInput",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testBuybackSlippageFailureRollsBackInputReserveAndOutput"
+      ]
+    },
+    {
+      "fingerprint": "fe09839afc010e544ac49b693e8b3d0930c3b457954cb1152be25d9d6adf4e95",
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "Equality checks the measured authorized transfer delta against the exact signed amount. Existing meter balance cannot credit a cancelled or absent authorization; fee-on-transfer and partial funding intentionally fail.",
+      "tests": [
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSignedPayerUSDCSettlesWithoutMintingOrAllowance",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testTokenRejectsUnauthorizedReceiverAndReusedAuthorization"
+      ]
+    },
+    {
+      "fingerprint": "c4b910767dc7780eabdf447562b167ed1fdf07327da58fb032f9443fe4cbf0bf",
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/ModelRegistry.sol": "526d840d26136f765e64f02d711645bb1602ce5fd816987c64211ae31472f18d"
+      },
+      "rationale": "The new entered guard is held across the token call and is shared by list and listWithPolicy through _list. Recursive mutation through either listing entrypoint reverts. Reported mapping/approval getters are read-only and observe the pre-list mapping; listing is never approved during the callback. Listing and policy writes follow the token call with no further external callback. Six dedicated callback regressions cover both entrypoints, reset and rollback. This exception binds the guarded source and does not attest previously deployed contracts.",
+      "tests": [
+        "_backend/contracts/test/RegistryReentrancy.t.sol#testListBlocksNestedListDuplicate",
+        "_backend/contracts/test/RegistryReentrancy.t.sol#testListBlocksNestedPolicyListDuplicate",
+        "_backend/contracts/test/RegistryReentrancy.t.sol#testPolicyListBlocksNestedListDuplicate",
+        "_backend/contracts/test/RegistryReentrancy.t.sol#testPolicyListBlocksNestedPolicyListDuplicate",
+        "_backend/contracts/test/RegistryReentrancy.t.sol#testListingGuardResetsAfterSuccess",
+        "_backend/contracts/test/RegistryReentrancy.t.sol#testRejectedStakeRollsBackAndResetsListingGuard"
+      ]
+    },
+    {
+      "fingerprint": "b8277dbdeccf137792316a60b5d61a3c1cfc7e05b76abdf3167a7607f9a551e0",
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/InsuranceStaking.sol": "fa971de1b41a3bbfb83a6d93ade32471200c2128cd576d99187b4099d22487ad"
+      },
+      "rationale": "A shared entered guard remains set across stake transferFrom and all other economic entrypoints, so callback mutation cannot reenter stake, withdrawal or reward accounting. Getter callbacks are read-only. Independent source review supports this guard reasoning; the listed tests cover accounting and ownership, not a malicious-token callback regression.",
+      "tests": [
+        "_backend/contracts/test/TokenAndStaking.t.sol#testFuzzStakeAndPartialUnstakePreserveAccounting",
+        "_backend/contracts/test/TokenAndStaking.t.sol#testStakeWithoutAllowanceRollsBackAccounting",
+        "_backend/contracts/test/TokenAndStaking.t.sol#testStakersCannotWithdrawEachOthersFunds",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testRewardConfigurationAndRecoveryAreOwnerControlled"
+      ]
+    },
+    {
+      "fingerprint": "decb389a4e8372243749f47f50a97fd705bd7f9743af10fa9b99fb9223f2e674",
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "The shared entered guard is held from entry through authorization, settlement state and payouts, and guards every economic settlement entrypoint. Token callbacks cannot perform another settlement; getter callbacks do not mutate state. Independent source review supports this guard reasoning; the supporting authorization tests are not malicious-token callback regressions.",
+      "tests": [
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSignedPayerUSDCSettlesWithoutMintingOrAllowance",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSignedPaymentReplayAndMalformedSignatureRejected",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSecondLegFailureRollsBackProviderTransferAndMandate"
+      ]
+    },
+    {
+      "fingerprint": "c2c500d7cddad3c1042cf2212b747e0a0decc9b189d569114964d636294027ac",
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "The shared entered guard is held across transferWithAuthorization and subsequent payouts and guards every economic settlement entrypoint. Token callbacks cannot perform another settlement; getter callbacks do not mutate state. Independent source review supports this guard reasoning; supporting authorization tests are not malicious-token callback regressions.",
+      "tests": [
+        "_backend/contracts/test/AtomicSettlement.t.sol#testTokenRejectsUnauthorizedReceiverAndReusedAuthorization",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSignedPaymentReplayAndMalformedSignatureRejected",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testSecondLegFailureRollsBackProviderTransferAndMandate"
+      ]
+    },
+    {
+      "fingerprint": "4d63a102f6944e57ff3ab58325288952b400124c8053d9b64eed9be10b3b6ab1",
+      "check": "uninitialized-local",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/UsageMeter.sol": "671d1c0ae2471fa9e333a990a59be94f647d72bdd728e216b5b82d1392c74be7"
+      },
+      "rationale": "Solidity initializes the local uint256 providerFee to zero. That value intentionally represents payments without a model listing; the model-bound branch assigns the calculated fee before use. This is a value variable, not an uninitialized storage reference.",
+      "tests": [
+        "_backend/contracts/test/PaymentsAndMandates.t.sol#testSettlementReplayCannotChargeTwice",
+        "_backend/contracts/test/AtomicSettlement.t.sol#testZeroAndFullProviderRatesConservePayment"
+      ]
+    },
+    {
+      "fingerprint": "0fbf2a288326d9e2404c0a66ea33a969cb063a0326defcbed9ccb97da45cfd19",
+      "check": "unused-return",
+      "impact": "Medium",
+      "sourceHashes": {
+        "_backend/contracts/src/FeeVault.sol": "b244ac6faa7856c83a371f0bed5b19d0458247a9ff2ea665fc228a791018c63b"
+      },
+      "rationale": "The router reported output is deliberately not trusted. Execution instead measures recipient output, requires actual input spend and minimum output, and clears the allowance. A lying return value cannot satisfy these measured checks.",
+      "tests": [
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testBuybackUsesConfiguredRouterAndMeasuredOutputAndClearsAllowance",
+        "_backend/contracts/test/RewardsAndBuybacks.t.sol#testLyingRouterCannotClaimExecutionWithoutSpendingInput"
+      ]
+    }
+  ]
+}

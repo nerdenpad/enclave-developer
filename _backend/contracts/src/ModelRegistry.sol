@@ -30,11 +30,19 @@ contract ModelRegistry {
     mapping(uint256 => Listing) public listings;
     mapping(bytes32 => mapping(bytes32 => uint256)) public idByHashes;
     mapping(uint256 => PolicyBinding) public listingPolicy;
+    bool private entered;
 
     event Listed(uint256 indexed id, bytes32 modelHash, bytes32 codeHash, address provider);
     event Approved(uint256 indexed id);
     event Revoked(uint256 indexed id);
     event PolicyBound(uint256 indexed id, bytes32 indexed policyHash, uint64 policyVersion);
+
+    modifier nonReentrant() {
+        require(!entered, "reentrant");
+        entered = true;
+        _;
+        entered = false;
+    }
 
     constructor(address encl_, uint256 listingStake_) {
         owner = msg.sender;
@@ -55,7 +63,7 @@ contract ModelRegistry {
         emit PolicyBound(id, policyHash, policyVersion);
     }
 
-    function _list(bytes32 modelHash, bytes32 codeHash, uint16 listingBps) private returns (uint256 id) {
+    function _list(bytes32 modelHash, bytes32 codeHash, uint16 listingBps) private nonReentrant returns (uint256 id) {
         require(modelHash != bytes32(0) && codeHash != bytes32(0), "hash");
         require(listingBps <= 10_000, "bps");
         require(idByHashes[modelHash][codeHash] == 0, "exists");

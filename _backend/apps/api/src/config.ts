@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAbsolute } from "node:path";
+import { isIP } from "node:net";
 import { withRelayKey } from "@enclave/core/relay-key";
 import { createOpenAICompatibleInference, isConfiguredAddress } from "@enclave/core";
 import { nearBaseUrl, nvidiaVerifierOptions } from "./near-provider.js";
@@ -9,6 +10,8 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   API_HOST: z.string().default("127.0.0.1"),
   WALLET_AUTH_ORIGIN: z.string().url().refine(value => { const url = new URL(value); return url.origin === value && url.protocol === "https:"; }, "Wallet login requires an exact HTTPS origin").optional(),
+  WALLET_AUTH_TRUSTED_PROXY_IPS: z.string().max(2048).default("").transform(value => value === "" ? [] : value.split(",").map(ip => ip.trim()))
+    .pipe(z.array(z.string().refine(ip => isIP(ip) !== 0 && !ip.includes("%"), "Trusted wallet proxy must be an exact IP address")).max(16)),
   API_PORT: z.coerce.number().int().positive().default(8787),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().default("redis://127.0.0.1:6379"),

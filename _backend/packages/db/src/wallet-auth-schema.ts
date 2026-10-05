@@ -15,9 +15,12 @@ CREATE TABLE IF NOT EXISTS wallet_accounts (
 );
 CREATE TABLE IF NOT EXISTS wallet_login_challenges (
   id text PRIMARY KEY, address text NOT NULL, message text NOT NULL,
-  expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+  expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  client_hash text NOT NULL DEFAULT 'legacy'
 );
+ALTER TABLE wallet_login_challenges ADD COLUMN IF NOT EXISTS client_hash text NOT NULL DEFAULT 'legacy';
 CREATE INDEX IF NOT EXISTS wallet_challenge_address_idx ON wallet_login_challenges(address, created_at);
+CREATE INDEX IF NOT EXISTS wallet_challenge_client_idx ON wallet_login_challenges(address, client_hash, created_at);
 CREATE INDEX IF NOT EXISTS wallet_challenge_expiry_idx ON wallet_login_challenges(expires_at);
 CREATE TABLE IF NOT EXISTS wallet_login_sessions (
   token_hash text PRIMARY KEY, owner_hash text NOT NULL REFERENCES api_keys(key_hash),

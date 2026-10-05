@@ -14,81 +14,81 @@
   "/404/": {
     "file": "404.html",
     "title": "Page not found \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/architecture/": {
     "file": "architecture.html",
     "title": "Architecture \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/dashboard/": {
     "file": "dashboard.html",
     "title": "Confidential workspace \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/": {
     "file": "home.html",
     "title": "Enclave \u2014 Confidential AI for the institutional chain",
-    "description": "Confidential AI inference, attested receipts and private agent commerce. Explore the Enclave protocol."
+    "description": "AI inference with verified provider evidence, signed receipts and authorized USDC payments. Explore the Enclave protocol."
   },
   "/insights/attestation-before-inference/": {
     "file": "insights-attestation-before-inference.html",
     "title": "Attestation before inference: where privacy begins \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/insights/": {
     "file": "insights.html",
     "title": "Insights \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/insights/private-agent-commerce/": {
     "file": "insights-private-agent-commerce.html",
     "title": "Private AI meets programmable USDC payments. \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/insights/understanding-inference-receipts/": {
     "file": "insights-understanding-inference-receipts.html",
     "title": "A receipt for every answer. No prompt disclosure. \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/legal/privacy-policy/": {
     "file": "legal-privacy-policy.html",
     "title": "Privacy policy \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/legal/risk-disclosure/": {
     "file": "legal-risk-disclosure.html",
     "title": "Risk disclosure \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/legal/terms-of-service/": {
     "file": "legal-terms-of-service.html",
     "title": "Terms of service \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/technology/": {
     "file": "technology.html",
     "title": "Technology \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/technology/model-registry/": {
     "file": "technology-model-registry.html",
     "title": "Model registry \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/technology/private-inference/": {
     "file": "technology-private-inference.html",
     "title": "Private inference \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/technology/receipts-and-audit/": {
     "file": "technology-receipts-and-audit.html",
     "title": "Receipts and audit \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   },
   "/technology/sealed-agents/": {
     "file": "technology-sealed-agents.html",
     "title": "Sealed agents \u2014 Enclave",
-    "description": "Explore Enclave confidential AI: attested compute, signed receipts and private USDC agent commerce."
+    "description": "Explore Enclave inference: verified remote compute, signed receipts and authorized USDC payments on Arc."
   }
 }

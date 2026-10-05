@@ -13,6 +13,7 @@ describe("loadConfig", () => {
   it("parses defaults", () => {
     const cfg = loadConfig({ DATABASE_URL: "postgres://enclave:enclave@127.0.0.1:5433/enclave" });
     expect(cfg.API_PORT).toBe(8787);
+    expect(cfg.WALLET_AUTH_TRUSTED_PROXY_IPS).toEqual([]);
     expect(cfg.TEE_MODE).toBe("dev");
     expect(cfg.NEAR_ENDPOINT_PROFILE).toBe("cloud");
     expect(cfg.NEAR_DIRECT_ADMISSION_ATTEMPTS).toBe(1);
@@ -22,6 +23,12 @@ describe("loadConfig", () => {
     expect(cfg.INFERENCE_HEALTH_PATH).toBeUndefined();
     expect(cfg.INFERENCE_TIMEOUT_MS).toBe(30_000);
     expect(cfg.ARC_RPC_MAX_RPS).toBe(20);
+  });
+  it("accepts only explicit IP addresses for wallet login proxies", () => {
+    expect(loadConfig({ DATABASE_URL: "postgres://test/db", WALLET_AUTH_TRUSTED_PROXY_IPS: "127.0.0.1, ::1" }).WALLET_AUTH_TRUSTED_PROXY_IPS).toEqual(["127.0.0.1", "::1"]);
+    for (const value of ["*", "127.0.0.0/8", "proxy.example", "127.0.0.1,", "unknown", "127.0.0.1:8787", "fe80::1%lo0"]) {
+      expect(() => loadConfig({ DATABASE_URL: "postgres://test/db", WALLET_AUTH_TRUSTED_PROXY_IPS: value })).toThrow("Invalid env");
+    }
   });
 
   it("defaults to a shared two request budget on nonlocal chains and accepts a bounded override", () => {
