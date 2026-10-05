@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { once } from "node:events";
 import type { PeerCertificate } from "node:tls";
 import { checkNearCertificate, createNearAttestationVerifier, nearBaseUrl, nvidiaVerifierOptions, peerSpkiSha256, runNearVerifier } from "./near-provider.js";
-import { AppError, type NearVerifiedSession } from "@enclave/core";
+import { AppError, getNearAttestationFailure, type NearVerifiedSession } from "@enclave/core";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -642,6 +642,8 @@ describe("isolated hardware verifier process protocol", () => {
       const error = await session().catch((caught: unknown) => caught);
       expect(error).toMatchObject({ code: "INFERENCE_ATTESTATION_FAILED", statusCode: 503 });
       expect((error as AppError).details).toEqual({ attestationFailure: { stage: "verifier", reason: "rejected", verifierError: errorCode } });
+      expect(getNearAttestationFailure(error)).toEqual({ stage: "verifier", reason: "rejected", verifierError: errorCode });
+      expect(Object.isFrozen(getNearAttestationFailure(error))).toBe(true);
       expect(JSON.stringify(error)).not.toContain("private-");
     });
 
@@ -650,6 +652,7 @@ describe("isolated hardware verifier process protocol", () => {
       await writeFile(policyPath, JSON.stringify({ mode: "fixed-error", errorCode }));
       const error = await runNearVerifier(runtime(), publicInput(), AbortSignal.timeout(5_000)).catch((caught: unknown) => caught);
       expect((error as AppError).details).toEqual({ attestationFailure: { stage: "verifier", reason: "process-failed" } });
+      expect(getNearAttestationFailure(error)).toEqual({ stage: "verifier", reason: "process-failed" });
       expect(JSON.stringify(error)).not.toContain("private");
       expect(JSON.stringify(error)).not.toContain("NVIDIA_PRIVATE_SECRET");
     });

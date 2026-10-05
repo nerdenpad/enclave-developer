@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
 import { AppError } from "./errors.js";
 import { sha256Hex } from "./hash.js";
-import { createNearInference, verifyNearTranscript, type NearAttestationVerifier, type NearInferenceEvidence, type NearInferenceOptions, type NearVerifiedFetch, type NearVerifiedSession } from "./near-inference.js";
+import { createNearInference, getNearInferenceFailure, verifyNearTranscript, type NearAttestationVerifier, type NearInferenceEvidence, type NearInferenceOptions, type NearVerifiedFetch, type NearVerifiedSession } from "./near-inference.js";
+import { createNearAttestationError } from "./near-attestation-error.js";
 
 const signer = privateKeyToAccount(`0x${"11".repeat(32)}`);
 const other = privateKeyToAccount(`0x${"22".repeat(32)}`);
@@ -41,6 +42,130 @@ beforeEach(() => {
 });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
+
+describe("private NEAR inference failure diagnostics", () => {
+  async function failed(overrides: Partial<NearInferenceOptions> = {}): Promise<unknown> {
+    try { await createNearInference({ ...settings, ...overrides })(Buffer.from("private diagnostic prompt")); }
+    catch (error) { return error; }
+    throw new Error("Expected the synthetic inference to fail");
+  }
+
+  it("preserves only a trusted verifier rejection before any POST", async () => {
+    const source = createNearAttestationError({ stage: "verifier", reason: "rejected", verifierError: "CPU_TCB_REJECTED" });
+    verify.mockRejectedValue(source);
+    const error = await failed();
+    expect(error).toMatchObject({ code: "NEAR_VERIFICATION_FAILED", message: "NEAR attestation or verified inference failed", details: undefined });
+    expect(error).not.toBe(source);
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "attestation", postAttempted: false, reason: "verification-failed",
+      attestationFailure: { stage: "verifier", reason: "rejected", verifierError: "CPU_TCB_REJECTED" } });
+    expect(JSON.stringify(error)).not.toContain("CPU_TCB_REJECTED");
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("ignores diagnostic-shaped arbitrary errors and their message/details getters", async () => {
+    const read = vi.fn(() => { throw new Error("private getter payload"); });
+    const source = Object.defineProperties({}, { message: { get: read }, details: { get: read } });
+    verify.mockRejectedValue(source);
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "attestation", postAttempted: false, reason: "verification-failed" });
+    expect(read).not.toHaveBeenCalled();
+    expect(getNearInferenceFailure(new AppError("NEAR_VERIFICATION_FAILED", "private", 502,
+      { phase: "signature", postAttempted: true, completionId: "private" }))).toBeUndefined();
+    expect(getNearInferenceFailure(source)).toBeUndefined();
+  });
+
+  it("keeps rejected session binding distinguishable from attempted dispatch", async () => {
+    session.tlsBound = false as unknown as true;
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "attestation", postAttempted: false, reason: "session-invalid" });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("records an attempted POST without claiming execution on a transport failure", async () => {
+    transport.mockRejectedValue(new AppError("PRIVATE", `${secret} private response`, 502,
+      { request: "private diagnostic prompt", response: "private body", httpStatus: 200 }));
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "dispatch", postAttempted: true, reason: "verification-failed" });
+    expect(transport).toHaveBeenCalledOnce();
+    expect(JSON.stringify(error)).not.toMatch(/private|never-log/);
+    expect(error).toMatchObject({ details: undefined });
+  });
+
+  it("preserves a trusted transport enum after attempting the pinned POST", async () => {
+    transport.mockRejectedValue(createNearAttestationError({ stage: "transport", reason: "tls" }));
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "dispatch", postAttempted: true, reason: "verification-failed",
+      attestationFailure: { stage: "transport", reason: "tls" } });
+  });
+
+  it.each([401, 429, 503])("records completion HTTP %s without retaining the error body or repeating the POST", async status => {
+    transport.mockResolvedValue(new Response(`private ${secret} response body`, { status }));
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "completion", postAttempted: true, reason: "http-status", httpStatus: status });
+    expect(JSON.stringify(getNearInferenceFailure(error))).not.toMatch(/private|never-log/);
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { ...completion, id: "private/id?token=secret" }, { ...completion, id: "x".repeat(257) }, { ...completion, model: "unapproved" },
+  ])("does not retain an invalid or unbound completion identifier %#", async response => {
+    transport.mockResolvedValue(Response.json(response));
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "completion", postAttempted: true, reason: "invalid-completion", httpStatus: 200 });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
+  it("records the validated identifier and signature phase without a stale POST HTTP status", async () => {
+    transport.mockImplementation(async (_url, init) => {
+      if (init.method === "POST") return new Response(rawResponse);
+      throw new Error(`private signature request ${secret}`);
+    });
+    const error = await failed();
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "signature", postAttempted: true, reason: "verification-failed", completionId: completion.id });
+    expect(transport.mock.calls.map(([, init]) => init.method)).toEqual(["POST", "GET"]);
+  });
+
+  it("records exhausted signature retrieval separately from completion failure", async () => {
+    transport.mockImplementation(async (_url, init) => init.method === "POST" ? new Response(rawResponse) : new Response("private", { status: 503 }));
+    const error = await failed({ maxSignatureAttempts: 2 });
+    expect(getNearInferenceFailure(error)).toEqual({ phase: "signature", postAttempted: true, reason: "signature-unavailable",
+      completionId: completion.id, httpStatus: 503 });
+    expect(transport.mock.calls.map(([, init]) => init.method)).toEqual(["POST", "GET", "GET"]);
+  });
+
+  it("records an unattested signature without retaining signature material or output", async () => {
+    transport.mockImplementation(async (_url, init) => {
+      if (init.method === "POST") { requestBody = init.body as string; return new Response(rawResponse); }
+      return signatureResponse({}, other);
+    });
+    const error = await failed();
+    const diagnostic = getNearInferenceFailure(error);
+    expect(diagnostic).toEqual({ phase: "signature", postAttempted: true, reason: "signer-unattested", completionId: completion.id, httpStatus: 200 });
+    expect(JSON.stringify(diagnostic)).not.toMatch(/Verified answer|private|signatureText|signingAddress|requestHash|responseHash/);
+    expect(Object.isFrozen(diagnostic)).toBe(true);
+    expect(error).toMatchObject({ details: undefined });
+  });
+
+  it.each(["attestation", "dispatch", "signature"] as const)("keeps the %s phase on timeout without concluding execution", async phase => {
+    if (phase === "attestation") verify.mockImplementation(() => new Promise(() => {}));
+    else transport.mockImplementation(async (_url, init) => {
+      if (phase === "signature" && init.method === "POST") return new Response(rawResponse);
+      return new Promise(() => {});
+    });
+    const error = await failed({ timeoutMs: 10 });
+    expect(error).toMatchObject({ code: "NEAR_INFERENCE_TIMEOUT", statusCode: 504, details: undefined });
+    expect(getNearInferenceFailure(error)).toEqual({ phase, postAttempted: phase !== "attestation", reason: "timeout",
+      ...(phase === "signature" ? { completionId: completion.id } : {}) });
+    expect(transport.mock.calls.filter(([, init]) => init.method === "POST")).toHaveLength(phase === "attestation" ? 0 : 1);
+  });
+
+  it("does not claim an invalid input error originated from a provider attempt", async () => {
+    const error = await failed({ maxRequestBytes: 1 });
+    expect(error).toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(getNearInferenceFailure(error)).toBeUndefined();
+    expect(verify).not.toHaveBeenCalled();
+  });
+});
 
 describe("verified NEAR cloud gateway inference", () => {
   const cloudSettings = { ...settings, baseUrl: "https://cloud-api.near.ai/v1" };

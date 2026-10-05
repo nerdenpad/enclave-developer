@@ -47,7 +47,22 @@ export async function completeInferenceExecution(tx: Tx, binding: InferenceExecu
 
 /** Never translate a committed external attempt into permission to execute it
  * again, including failures before publication or a lost commit acknowledgement. */
-export async function runClaimedInference<T>(paymentId: string, execute: () => Promise<T>): Promise<T> {
+export async function runClaimedInference<T>(paymentId: string, execute: () => Promise<T>,
+  recordFailure?: (error: unknown) => undefined): Promise<T> {
   try { return await execute(); }
-  catch { throw uncertainInference(paymentId); }
+  catch (error) {
+    // Private telemetry is best effort. A logger failure must not replace the
+    // quarantine response or make the durable claim eligible for redispatch.
+    try { recordFailure?.(error); } catch { /* The dispatch claim remains permanent. */ }
+    throw uncertainInference(paymentId);
+  }
+}
+
+const executionFailureCodes = ["NEAR_VERIFICATION_FAILED", "NEAR_INFERENCE_TIMEOUT", "INFERENCE_ATTESTATION_FAILED",
+  "MODEL_NOT_APPROVED", "ATTESTATION_FAILED", "KEY_NOT_RELEASED", "TAMPERED_IMAGE", "CONFLICT", "FORBIDDEN",
+  "VALIDATION_FAILED"] as const;
+
+/** Never put arbitrary error codes, messages, causes or details in telemetry. */
+export function inferenceExecutionFailureCode(error: unknown): typeof executionFailureCodes[number] | "EXECUTION_FAILED" {
+  return error instanceof AppError ? executionFailureCodes.find(code => code === error.code) ?? "EXECUTION_FAILED" : "EXECUTION_FAILED";
 }

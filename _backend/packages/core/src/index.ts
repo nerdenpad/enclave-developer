@@ -26,7 +26,7 @@ export {
 } from "./receipt.js";
 export { DevCvm, type CvmConfig, type InferenceContext } from "./cvm.js";
 export { createOpenAICompatibleInference, type InferenceAdapter, type OpenAICompatibleInferenceOptions } from "./inference.js";
-export { createNearInference, verifyNearTranscript, type NearInferenceAdapter, type NearInferenceEvidence, type NearAttestationVerifier, type NearVerifiedFetch, type NearVerifiedSession } from "./near-inference.js";
+export { createNearInference, getNearInferenceFailure, verifyNearTranscript, type NearInferenceAdapter, type NearInferenceEvidence, type NearInferenceFailure, type NearAttestationVerifier, type NearVerifiedFetch, type NearVerifiedSession } from "./near-inference.js";
 export { signProviderProof, verifyProviderProof, providerEvidenceHash, canonicalEvidenceJson, type ProviderProof, type ProviderTranscript } from "./provider-proof.js";
 export { isConfiguredAddress } from "./addresses.js";
 export { indexerScope } from "./indexer-scope.js";
@@ -43,3 +43,5 @@ export { nextTcbVersion, tcbPolicyRecord, canonicalTcbPolicy, parseTcbPolicy, tc
 export { productionReleaseManifestSchema, productionProviderPolicySchema, productionInferenceArchiveSchema,
   ProductionReleaseError, validateProductionProviderPolicy, validateProductionRelease,
   type ProductionReleaseManifest, type ProductionProviderPolicy } from "./release-manifest.js";
+
+export { createNearAttestationError, getNearAttestationFailure, isNearAttestationError, isUnapprovedNearWorkload, nearVerifierErrorCodes, type NearAttestationFailure } from "./near-attestation-error.js";

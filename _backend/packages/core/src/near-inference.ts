@@ -4,6 +4,7 @@ import { recoverMessageAddress } from "viem";
 import { z } from "zod";
 import { AppError, ValidationError } from "./errors.js";
 import { sha256Hex } from "./hash.js";
+import { getNearAttestationFailure, type NearAttestationFailure } from "./near-attestation-error.js";
 
 type Hex = `0x${string}`;
 
@@ -56,6 +57,25 @@ export type NearInferenceResult = {
 
 export type NearInferenceAdapter = (plaintext: Buffer) => Promise<NearInferenceResult>;
 
+export type NearInferenceFailure = Readonly<{
+  phase: "attestation" | "dispatch" | "completion" | "signature";
+  reason: "session-invalid" | "attestation-proof-invalid" | "response-limit" | "response-missing" | "invalid-json"
+    | "transport-binding" | "signature-noncanonical" | "http-status" | "invalid-completion" | "output-limit"
+    | "signature-unavailable" | "signature-binding" | "signer-unattested" | "verification-failed" | "timeout";
+  /** The pinned POST was attempted; this does not establish that the model executed it. */
+  postAttempted: boolean;
+  httpStatus?: number;
+  /** Validated provider identifier; hash it before logging because it is provider-controlled. */
+  completionId?: string;
+  attestationFailure?: Readonly<NearAttestationFailure>;
+}>;
+
+// Diagnostics belong only to errors created by this adapter. Never read arbitrary error details.
+const failures = new WeakMap<object, NearInferenceFailure>();
+export function getNearInferenceFailure(error: unknown): NearInferenceFailure | undefined {
+  return error !== null && (typeof error === "object" || typeof error === "function") ? failures.get(error) : undefined;
+}
+
 export type NearInferenceOptions = {
   baseUrl: string;
   model: string;
@@ -89,8 +109,12 @@ const signatureSchema = z.object({
 });
 
 /** Only errors generated here are forwarded; hook/provider exceptions are redacted. */
+const failureReasons = new WeakMap<NearError, NearInferenceFailure["reason"]>();
 class NearError extends AppError {
-  constructor(message: string) { super("NEAR_VERIFICATION_FAILED", message, 502); }
+  constructor(message: string, reason: NearInferenceFailure["reason"] = "verification-failed") {
+    super("NEAR_VERIFICATION_FAILED", message, 502);
+    failureReasons.set(this, reason);
+  }
 }
 
 function limit(value: number, maximum: number): number {
@@ -118,10 +142,10 @@ function assertSession(session: NearVerifiedSession): void {
     || !Array.isArray(session.allowedSigners) || session.allowedSigners.length < 1 || session.allowedSigners.length > 64
     || session.allowedSigners.some((signer) => !address.test(signer) || /^0x0{40}$/i.test(signer))
     || !Number.isFinite(issued) || !Number.isFinite(expires) || issued > now + 30_000 || expires <= now || expires <= issued) {
-    throw new NearError("NEAR attestation session is invalid or expired");
+    throw new NearError("NEAR attestation session is invalid or expired", "session-invalid");
   }
   if (session.attestationProof !== undefined && (typeof session.attestationProof !== "string"
-    || Buffer.byteLength(session.attestationProof) > 4_194_304)) throw new NearError("NEAR attestation proof is invalid");
+    || Buffer.byteLength(session.attestationProof) > 4_194_304)) throw new NearError("NEAR attestation proof is invalid", "attestation-proof-invalid");
 }
 
 async function bounded<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -137,9 +161,9 @@ async function readBody(response: Response, maximum: number, signal: AbortSignal
   const declared = response.headers.get("content-length");
   if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > maximum)) {
     await bounded(response.body?.cancel() ?? Promise.resolve(), signal);
-    throw new NearError("NEAR response exceeds the byte limit");
+    throw new NearError("NEAR response exceeds the byte limit", "response-limit");
   }
-  if (!response.body) throw new NearError("NEAR response body is missing");
+  if (!response.body) throw new NearError("NEAR response body is missing", "response-missing");
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -150,7 +174,7 @@ async function readBody(response: Response, maximum: number, signal: AbortSignal
       size += chunk.value.byteLength;
       if (size > maximum) {
         await bounded(reader.cancel(), signal);
-        throw new NearError("NEAR response exceeds the byte limit");
+        throw new NearError("NEAR response exceeds the byte limit", "response-limit");
       }
       chunks.push(chunk.value);
     }
@@ -162,20 +186,20 @@ async function readBody(response: Response, maximum: number, signal: AbortSignal
 
 function parseJson(bytes: Buffer): unknown {
   try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown; }
-  catch { throw new NearError("NEAR returned invalid JSON"); }
+  catch { throw new NearError("NEAR returned invalid JSON", "invalid-json"); }
 }
 
 function assertResponseOrigin(response: Response, origin: string): void {
   if (response.redirected || (response.url && new URL(response.url).origin !== origin)) {
-    throw new NearError("NEAR response transport binding failed");
+    throw new NearError("NEAR response transport binding failed", "transport-binding");
   }
 }
 
 async function recoverCanonicalSignature(text: string, sig: Hex): Promise<Hex> {
-  if (!/^0x[0-9a-fA-F]{130}$/.test(sig)) throw new NearError("NEAR signature is not canonical");
+  if (!/^0x[0-9a-fA-F]{130}$/.test(sig)) throw new NearError("NEAR signature is not canonical", "signature-noncanonical");
   const s = BigInt(`0x${sig.slice(66, 130)}`);
   const v = Number.parseInt(sig.slice(130), 16);
-  if (s === 0n || s > halfCurveOrder || ![0, 1, 27, 28].includes(v)) throw new NearError("NEAR signature is not canonical");
+  if (s === 0n || s > halfCurveOrder || ![0, 1, 27, 28].includes(v)) throw new NearError("NEAR signature is not canonical", "signature-noncanonical");
   return recoverMessageAddress({ message: text, signature: sig });
 }
 
@@ -243,48 +267,60 @@ export function createNearInference(options: NearInferenceOptions): NearInferenc
     const requestHash = sha256Hex(requestBody);
     const signal = AbortSignal.timeout(timeoutMs);
     let session: NearVerifiedSession | undefined;
+    let phase: NearInferenceFailure["phase"] = "attestation";
+    let postAttempted = false;
+    let httpStatus: number | undefined;
+    let completionId: string | undefined;
     try {
       session = await bounded(options.verifyAttestation({ baseUrl: base.href.replace(/\/$/, ""), model, signal }), signal);
       assertSession(session);
       signal.throwIfAborted();
       // No global fetch fallback: only the transport pinned by the verifier may see the prompt.
+      phase = "dispatch";
+      postAttempted = true;
       const response = await bounded(session.fetch(new URL("chat/completions", base), {
         method: "POST", headers, body: requestBody.toString("utf8"), redirect: "error", signal,
       }), signal);
+      phase = "completion";
+      if (Number.isInteger(response.status) && response.status >= 100 && response.status <= 599) httpStatus = response.status;
       assertResponseOrigin(response, base.origin);
       if (response.status !== 200) {
         await bounded(response.body?.cancel() ?? Promise.resolve(), signal);
-        throw new NearError(`NEAR inference returned HTTP ${response.status}`);
+        throw new NearError(`NEAR inference returned HTTP ${response.status}`, "http-status");
       }
       const responseBody = await readBody(response, maxResponseBytes, signal);
       const parsed = completionSchema.safeParse(parseJson(responseBody));
-      if (!parsed.success || parsed.data.model !== model) throw new NearError("NEAR returned an invalid completion or model");
+      if (!parsed.success || parsed.data.model !== model) throw new NearError("NEAR returned an invalid completion or model", "invalid-completion");
+      completionId = parsed.data.id;
       const output = Buffer.from(parsed.data.choices[0]!.message.content, "utf8");
-      if (output.length > maxOutputBytes) throw new NearError("NEAR output exceeds the byte limit");
+      if (output.length > maxOutputBytes) throw new NearError("NEAR output exceeds the byte limit", "output-limit");
       const responseHash = sha256Hex(responseBody);
       const signatureText = `${model}:${requestHash.slice(2)}:${responseHash.slice(2)}`;
       const signatureUrl = new URL(`signature/${parsed.data.id}?signing_algo=ecdsa`, base);
+      phase = "signature";
       for (let attempt = 0; attempt < attempts; attempt++) {
+        httpStatus = undefined;
         assertSession(session);
         const proofResponse = await bounded(session.fetch(signatureUrl, { method: "GET", headers, redirect: "error", signal }), signal);
+        if (Number.isInteger(proofResponse.status) && proofResponse.status >= 100 && proofResponse.status <= 599) httpStatus = proofResponse.status;
         assertResponseOrigin(proofResponse, base.origin);
         if ([404, 503, 504].includes(proofResponse.status)) {
           await bounded(proofResponse.body?.cancel() ?? Promise.resolve(), signal);
           if (attempt + 1 < attempts) { await delay(retryDelayMs, undefined, { signal }); continue; }
-          throw new NearError("NEAR signature was not available within the retry limit");
+          throw new NearError("NEAR signature was not available within the retry limit", "signature-unavailable");
         }
         if (proofResponse.status !== 200) {
           await bounded(proofResponse.body?.cancel() ?? Promise.resolve(), signal);
-          throw new NearError(`NEAR signature returned HTTP ${proofResponse.status}`);
+          throw new NearError(`NEAR signature returned HTTP ${proofResponse.status}`, "http-status");
         }
         const proof = signatureSchema.safeParse(parseJson(await readBody(proofResponse, 16_384, signal)));
         if (!proof.success || proof.data.text !== signatureText
-          || (cloudGateway && proof.data.signature_kind !== "provider_tee")) throw new NearError("NEAR signature payload does not bind this inference");
+          || (cloudGateway && proof.data.signature_kind !== "provider_tee")) throw new NearError("NEAR signature payload does not bind this inference", "signature-binding");
         const sig = proof.data.signature as Hex;
         const recovered = await bounded(recoverCanonicalSignature(signatureText, sig), signal);
         if (recovered.toLowerCase() !== proof.data.signing_address.toLowerCase()
           || !session.allowedSigners.some((signer) => signer.toLowerCase() === recovered.toLowerCase())) {
-          throw new NearError("NEAR signature signer is not attested");
+          throw new NearError("NEAR signature signer is not attested", "signer-unattested");
         }
         assertSession(session);
         signal.throwIfAborted();
@@ -297,11 +333,17 @@ export function createNearInference(options: NearInferenceOptions): NearInferenc
           transcript: { requestBody, responseBody, ...(session.attestationProof === undefined ? {} : { attestationProof: session.attestationProof }) },
         };
       }
-      throw new NearError("NEAR signature was not available within the retry limit");
+      throw new NearError("NEAR signature was not available within the retry limit", "signature-unavailable");
     } catch (error) {
-      if (signal.aborted) throw new AppError("NEAR_INFERENCE_TIMEOUT", "NEAR verified inference timed out", 504);
-      if (error instanceof NearError) throw error;
-      throw new NearError("NEAR attestation or verified inference failed");
+      const safeError = signal.aborted ? new AppError("NEAR_INFERENCE_TIMEOUT", "NEAR verified inference timed out", 504)
+        : error instanceof NearError ? error : new NearError("NEAR attestation or verified inference failed");
+      const attestationFailure = getNearAttestationFailure(error);
+      failures.set(safeError, Object.freeze({ phase, postAttempted,
+        reason: signal.aborted ? "timeout" : safeError instanceof NearError ? failureReasons.get(safeError) ?? "verification-failed" : "verification-failed",
+        ...(httpStatus === undefined ? {} : { httpStatus }), ...(completionId === undefined ? {} : { completionId }),
+        ...(attestationFailure === undefined ? {} : { attestationFailure }),
+      }));
+      throw safeError;
     } finally {
       try { session?.close?.(); } catch { /* Cleanup must not expose transport internals. */ }
     }

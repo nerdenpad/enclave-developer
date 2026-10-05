@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
-import { encryptAesGcm, sha256Hex, type DevCvm, type SignedReceipt } from "@enclave/core";
+import { createNearAttestationError, createNearInference, encryptAesGcm, sha256Hex, type DevCvm, type SignedReceipt } from "@enclave/core";
 import { inferenceExecutions, idempotencyKeys, type Database } from "@enclave/db";
 import { EnclaveGateway } from "./gateway.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
+import type { Logger } from "./logger.js";
 import * as tcb from "./tcb-lifecycle.js";
 import { claimInferenceExecution, uncertainInference } from "./inference-execution.js";
 
@@ -84,7 +85,7 @@ function durableDatabase() {
     failPublication: (failure: typeof publicationFailure) => { publicationFailure = failure; } };
 }
 
-function fixture() {
+function fixture(log: Logger = createLogger("silent")) {
   const durable = durableDatabase();
   const secret = Buffer.alloc(32, 7);
   const paymentId = randomUUID(), sessionId = randomUUID(), keyHash = sha256Hex("owner fixture");
@@ -103,7 +104,7 @@ function fixture() {
   const cvm = { modelHash: hash, codeHash: hash, sessionSecret: () => secret, infer } as unknown as DevCvm;
   const state = { policyHash: hash } as tcb.TcbState;
   function gateway() {
-    const instance = new EnclaveGateway(durable.db, cvm, config, createLogger("silent"), undefined);
+    const instance = new EnclaveGateway(durable.db, cvm, config, log, undefined);
     // This unit targets durable dispatch ordering, not authentication/hardware
     // verification, which have independent negative and acceptance suites.
     const access = instance as unknown as {
@@ -199,5 +200,61 @@ describe("durable remote inference dispatch", () => {
     const error = uncertainInference("public-payment-id");
     expect(error.details).toEqual({ paymentId: "public-payment-id" });
     expect(error.message).not.toMatch(/signature|prompt|token/);
+  });
+
+  it.each(["provider", "publication-commit"] as const)("records a private %s failure once without raw error data or redispatch", async failure => {
+    const lines: string[] = [];
+    const f = fixture(createLogger("warn", { write: line => { lines.push(line); } }));
+    if (failure === "provider") f.infer.mockRejectedValueOnce(new Error("PRIVATE_PROMPT_TOKEN_AND_RESPONSE"));
+    else f.durable.failPublication("before-commit");
+    await expect(f.gateway().instance.infer(f.input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
+    const entries = lines.map(line => JSON.parse(line));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ msg: "inference_execution_quarantined", paymentId: f.input.paymentId,
+      requestHash: f.durable.snapshot().dispatches[0]?.requestHash,
+      executionClaimId: f.durable.snapshot().dispatches[0]?.claimId, code: "EXECUTION_FAILED",
+      stage: failure === "provider" ? "provider" : "publication", providerResultReturned: failure !== "provider" });
+    expect(lines.join("\n")).not.toContain("PRIVATE_PROMPT_TOKEN_AND_RESPONSE");
+    expect(lines.join("\n")).not.toContain("Injected publication commit failure");
+    expect(entries[0]).not.toHaveProperty("err"); expect(entries[0]).not.toHaveProperty("providerFailure");
+    f.durable.failPublication(undefined);
+    await expect(f.gateway().instance.infer(f.input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
+    expect(f.infer).toHaveBeenCalledOnce(); expect(lines).toHaveLength(1);
+    expect(f.durable.snapshot().dispatches[0]?.status).toBe("dispatched");
+  });
+
+  it.each(["attestation", "signature"] as const)("records trusted %s diagnostics without exposing provider identifiers or response data", async phase => {
+    const completionId = "PRIVATE_COMPLETION_ID", lines: string[] = [];
+    const f = fixture(createLogger("warn", { write: line => { lines.push(line); } }));
+    const post = vi.fn(async (_url: URL, init: RequestInit) => init.method === "POST"
+      ? Response.json({ id: completionId, model: "Fixture/Test", choices: [{ message: { content: "PRIVATE_RESPONSE" } }] })
+      : new Response("PRIVATE_HTTP_BODY", { status: 404 }));
+    const adapter = createNearInference({ baseUrl: "https://test.completions.near.ai/v1", model: "Fixture/Test",
+      apiKey: "PRIVATE_API_KEY", maxSignatureAttempts: 1,
+      verifyAttestation: async () => {
+        if (phase === "attestation") throw createNearAttestationError({ stage: "verifier", reason: "rejected", verifierError: "CPU_TCB_REJECTED" });
+        return { allowedSigners: [`0x${"11".repeat(20)}`], attestationRef: sha256Hex("attestation fixture"),
+          verifiedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          tlsBound: true, fetch: post };
+      } });
+    f.infer.mockImplementationOnce(async () => { await adapter(Buffer.from("PRIVATE_PROMPT")); throw new Error("Unreachable"); });
+    const error = await f.gateway().instance.infer(f.input).catch(error => error);
+    expect(error).toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN", details: { paymentId: f.input.paymentId } });
+    expect(JSON.stringify(error)).not.toMatch(/CPU_TCB|PRIVATE|providerFailure/);
+    const entry = JSON.parse(lines[0]!);
+    expect(lines).toHaveLength(1);
+    expect(entry).toMatchObject({ msg: "inference_execution_quarantined", stage: "provider", code: "NEAR_VERIFICATION_FAILED",
+      providerResultReturned: false, providerFailure: { phase, postAttempted: phase === "signature" } });
+    if (phase === "attestation") {
+      expect(entry.providerFailure.attestationFailure).toEqual({ stage: "verifier", reason: "rejected", verifierError: "CPU_TCB_REJECTED" });
+      expect(post).not.toHaveBeenCalled();
+    } else {
+      expect(entry.providerFailure).toMatchObject({ reason: "signature-unavailable", httpStatus: 404, completionIdHash: sha256Hex(completionId) });
+      expect(post.mock.calls.filter(([, init]) => init.method === "POST")).toHaveLength(1);
+    }
+    expect(entry.providerFailure).not.toHaveProperty("completionId");
+    expect(lines.join("\n")).not.toContain("PRIVATE");
+    await expect(f.gateway().instance.infer(f.input)).rejects.toMatchObject({ code: "INFERENCE_EXECUTION_UNCERTAIN" });
+    expect(f.infer).toHaveBeenCalledOnce(); expect(lines).toHaveLength(1);
   });
 });

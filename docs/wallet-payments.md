@@ -1,6 +1,6 @@
 # Wallet connections and real USDC
 
-The final domain is **enclaveagent.tech**. The payment network is **Arc Mainnet (5042)** and the approved price is **0.10 USDC per request**. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. An operator EOA request passed payment, complete model response, receipt and confirmed anchor on 4 October 2026. On 5 October, the owner reported one successful paid wallet request with a correct answer and independent receipt/Arc-anchor checks. Fixes for stale OKX sessions, login messages and browser CI are implemented and passed local validation; a GitHub browser rerun and manual recovery checks remain pending. One request does not establish full wallet compatibility. Wallet connection remains separate from sign-in and payment. Live settlement interruption, signer rotation and model revocation acceptance remain open. See [release progress](release-progress.md) for dated evidence and the [Arc deployment profile](arc-deployment.md) for configuration.
+The final domain is **enclaveagent.tech**. The payment network is **Arc Mainnet (5042)** and the approved price is **0.10 USDC per request**. Reviewed provider policy v6 and its accepted NEAR + Arc release manifest are installed. An operator EOA request passed payment, complete model response, receipt and confirmed anchor on 4 October 2026. On 5 October, the owner reported one successful paid wallet request with a correct answer and independent receipt/Arc-anchor checks. A later payment settled without a published answer or receipt and remains quarantined; actual model execution and the exact failure cause are unknown. QR reconnection and private diagnostics were deployed on 5 October; physical OKX recovery checks remain pending. The successful GitHub CI rerun covers the earlier fixes. One request does not establish full wallet compatibility. Wallet connection remains separate from sign-in and payment. Payment reconciliation, live settlement interruption, signer rotation and model revocation acceptance remain open. See [release progress](release-progress.md) for dated evidence and the [Arc deployment profile](arc-deployment.md) for configuration.
 
 ## Implemented connection
 
@@ -21,6 +21,20 @@ After connecting on Arc, choose **Sign in with connected wallet**. This requests
 The backend verifies the signature against its stored message and atomically consumes the nonce. Each wallet has a stable private workspace identity. A random session lasts 30 minutes; only its hash is stored in PostgreSQL. The browser keeps the bearer in memory and a durable copy in a Secure, HttpOnly, SameSite=Strict cookie scoped to `/api/v1/auth/wallet`. Origin-checked POST resume verifies the selected address and existing expiry before restoring the workspace. Navigation and reload do not require a new signature or extend expiry. Logout revokes the session; changing the wallet or network clears the workspace. A public selection hint is stored in localStorage, but no login token, API key or payment signature is stored there.
 
 Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions can inspect their own workspace and use the configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. Login itself is not a payment or hardware proof.
+
+### QR recovery deployed — 5 October 2026
+
+The **Reconnect via QR** action is deployed. Use it when an old mobile-wallet
+session stops responding. Scan
+the new QR code, approve connection on Arc and, if needed, sign in again.
+Reconnection cancels a stale sign-in attempt without refreshing the page. The
+same wallet retains its signed workspace and existing payment recovery;
+connecting a different wallet clears the previous wallet's workspace and recovery.
+
+Connection does not submit a payment or repeat an inference. A quarantined paid
+request still requires operator review; a new QR code cannot release it. Frontend
+TypeScript, 281 unit tests and 71 browser scenarios passed, and the HTTPS rollout
+checks passed. Physical OKX recovery verification remains pending.
 
 ### Sign-in recovery — 4 October 2026
 

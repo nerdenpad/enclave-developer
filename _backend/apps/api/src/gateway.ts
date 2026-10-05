@@ -18,6 +18,7 @@ import {
   encryptAesGcm,
   createOpenAICompatibleInference,
   createNearInference,
+  getNearInferenceFailure,
   hashAgentPolicy,
   hashViewSecret,
   listingBpsValid,
@@ -65,7 +66,7 @@ import { loadOrCreateCvmKeys, storedToBuffers } from "./cvm-store.js";
 import { authorizationData, validateAuthorization } from "./authorization.js";
 import { settlementScope, verifySettlementProof } from "./settlement-proof.js";
 import { modelRegistryScope } from "./model-registry-scope.js";
-import { claimInferenceExecution, completeInferenceExecution, runClaimedInference } from "./inference-execution.js";
+import { claimInferenceExecution, completeInferenceExecution, inferenceExecutionFailureCode, runClaimedInference } from "./inference-execution.js";
 import { verifyRuntimeContractWiring } from "./runtime-contract-wiring.js";
 import { createNearAttestationVerifier, nvidiaVerifierOptions } from "./near-provider.js";
 import { assertAcceptedRelease, releaseIsFresh, verifyAcceptedProviderEvidence, type AcceptedRelease } from "./release-profile.js";
@@ -460,6 +461,7 @@ export class EnclaveGateway {
     });
     if (execution && "replay" in execution) return execution.replay;
 
+    let executionStage: "pre-provider" | "provider" | "publication" = "pre-provider";
     const publish = () => this.db.transaction(async (tx) => {
       if (input.idempotencyKey) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${keyHash}:${input.idempotencyKey}`}))`);
@@ -472,6 +474,7 @@ export class EnclaveGateway {
       }
 
       await this.consumePayment(tx, keyHash, input.paymentId as string, price, requestHash);
+      executionStage = "provider";
       const { receipt, output: outputBytes, providerProof, providerTranscript } = await cvm.infer(plaintext, { attRef: session.attRef as `0x${string}` }).catch((error: unknown) => {
         if (error instanceof AppError && ["INFERENCE_ATTESTATION_FAILED", "NEAR_VERIFICATION_FAILED"].includes(error.code)) {
           this.providerPreflightAttempt++;
@@ -481,6 +484,7 @@ export class EnclaveGateway {
         // quarantine; invalid readiness never authorizes another dispatch.
         throw error;
       });
+      executionStage = "publication";
       // A model may be revoked while the remote inference is in progress.
       await assertCurrentTcb(tx, state.policyHash);
       await this.assertRuntimeContractWiring();
@@ -565,7 +569,18 @@ export class EnclaveGateway {
       if (execution) await completeInferenceExecution(tx, executionBinding, execution.claimId, typedHash);
       return { receipt, typedHash, outputHash: receipt.outHash, output, ...(providerEvidence ? { providerEvidence } : {}) };
     });
-    const result = execution ? await runClaimedInference(input.paymentId, publish) : await publish();
+    const result = execution ? await runClaimedInference(input.paymentId, publish, error => {
+      const failure = getNearInferenceFailure(error);
+      let providerFailure;
+      if (failure) {
+        const { completionId, ...summary } = failure;
+        providerFailure = { ...summary, ...(completionId ? { completionIdHash: sha256Hex(completionId) } : {}) };
+      }
+      this.log.warn({ paymentId: input.paymentId, requestHash, executionClaimId: execution.claimId,
+        stage: executionStage, providerResultReturned: executionStage === "publication",
+        code: inferenceExecutionFailureCode(error), ...(providerFailure ? { providerFailure } : {}) }, "inference_execution_quarantined");
+      return undefined;
+    }) : await publish();
 
     if (this.queues) {
       await this.queues.receiptAnchorer.add(

@@ -19,6 +19,8 @@ export function WalletConnectControl() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [savedSession, setSavedSession] = useState(false);
+  const [qrReconnectAvailable, setQrReconnectAvailable] = useState(false);
   const [uri, setUri] = useState("");
   const [qr, setQr] = useState("");
   const [selected, setSelected] = useState<ListedWallet | null>(null);
@@ -32,6 +34,7 @@ export function WalletConnectControl() {
   const [directoryError, setDirectoryError] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef<HTMLButtonElement | null>(null);
   const attempt = useRef<AbortController | null>(null);
   const connection = useRef<WalletConnection | null>(null);
   const revision = useRef(0);
@@ -47,13 +50,15 @@ export function WalletConnectControl() {
     void restoreWallet(restoreAbort.signal, (value, reason = "connection") => {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
-      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null, true, reason); setNotice("Wallet session is unavailable. Connect again to continue."); }
+      if (!value) { forgetWallet(); connection.current = null; setSavedSession(false); setPaymentWallet(null, true, reason); setNotice("Wallet session is unavailable. Connect again to continue."); }
       else walletChanged(reason);
     }).then(result => {
       if (!result) return;
       if (!alive.current || current !== revision.current) { result.detach?.(); return; }
       connection.current = result; setPaymentWallet(result); setAccount(result.account);
-      setNotice("Wallet connection restored.");
+      const saved = result.account.transport === "walletconnect";
+      setSavedSession(saved); setQrReconnectAvailable(saved);
+      setNotice(saved ? "Saved wallet session. Open your wallet to sign in, or reconnect with QR." : "Wallet connection restored.");
     }).catch(() => {});
     return () => {
       restoreAbort.abort();
@@ -95,16 +100,26 @@ export function WalletConnectControl() {
     return () => { active = false; };
   }, [uri]);
 
+  function restoreTriggerFocus() {
+    // Reconnect is disabled while pairing. Restore focus after React has
+    // rendered its enabled state, unless another dialog has already opened.
+    requestAnimationFrame(() => {
+      if (!alive.current || dialog.current?.open) return;
+      const source = returnFocus.current?.isConnected && !returnFocus.current.disabled ? returnFocus.current : trigger.current;
+      source?.focus();
+    });
+  }
   function close() {
     if (attempt.current) { revision.current++; attempt.current.abort(); attempt.current = null; }
     setBusy(false); setUri(""); setQr(""); setSelected(null); setOpen(false);
-    dialog.current?.close(); trigger.current?.focus();
+    dialog.current?.close(); restoreTriggerFocus();
   }
   function show() {
+    returnFocus.current = trigger.current;
     setError(""); setNotice(""); setOpen(true);
     discovery.current ??= discoverWallets(window, setWallets);
   }
-  async function connect(wallet: BrowserWallet | ListedWallet | null) {
+  async function connect(wallet: BrowserWallet | ListedWallet | null, targetChainId = chainId) {
     if (busy) return;
     restoration.current?.abort();
     const current = ++revision.current;
@@ -115,24 +130,43 @@ export function WalletConnectControl() {
     const changed = (value: WalletAccount | null, reason: "connection" | "identity" = "connection") => {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
-      if (!value) { forgetWallet(); connection.current = null; setPaymentWallet(null, true, reason); setNotice("Wallet disconnected. Connect again to continue."); }
+      if (!value) { forgetWallet(); connection.current = null; setSavedSession(false); setPaymentWallet(null, true, reason); setNotice("Wallet disconnected. Connect again to continue."); }
       else walletChanged(reason);
     };
     try {
       const result = browser ? await connectBrowserWallet(browser, controller.signal, changed)
-        : await connectWalletConnect(walletProjectId, chainId, controller.signal, value => {
+        : await connectWalletConnect(walletProjectId, targetChainId, controller.signal, value => {
           if (alive.current && current === revision.current) setUri(value);
         }, changed);
       if (!alive.current || controller.signal.aborted || current !== revision.current) { await result.disconnect(); return; }
       connection.current = result;
       rememberWallet(result, browser);
       setPaymentWallet(result);
+      setSavedSession(false); setQrReconnectAvailable(result.account.transport === "walletconnect");
       setAccount(result.account); setOpen(false); setUri(""); setQr("");
-      dialog.current?.close(); trigger.current?.focus();
+      dialog.current?.close(); restoreTriggerFocus();
       setNotice(`Wallet connected. ${paymentNotice}`);
     } catch (failure) {
       if (alive.current && current === revision.current) { setError(walletError(failure)); setUri(""); setSelected(null); }
     } finally { if (alive.current && current === revision.current) { setBusy(false); attempt.current = null; } }
+  }
+  function reconnectWithQr(source?: HTMLButtonElement) {
+    if (busy || !walletProjectId) return;
+    returnFocus.current = source ?? trigger.current;
+    restoration.current?.abort(); revision.current++; attempt.current?.abort();
+    const previous = connection.current; connection.current = null;
+    // Detach cancels local signature waits immediately. The old peer may never
+    // acknowledge disconnect, so its exact-topic cleanup must not delay a new QR.
+    previous?.detach?.();
+    forgetWallet(); setSavedSession(false); setQrReconnectAvailable(true);
+    setPaymentWallet(null, true, "connection");
+    setAccount(null); setChainId(arc.chainId); setError(""); setNotice("");
+    setUri(""); setQr(""); setSelected(null); setOpen(true);
+    void previous?.disconnect().catch(() => {});
+    // Reconnecting alone never requests a login signature or a payment. The
+    // dashboard retains its workspace for the same wallet and clears it if the
+    // newly approved identity changes.
+    void connect(null, arc.chainId);
   }
   async function disconnect() {
     restoration.current?.abort();
@@ -141,7 +175,7 @@ export function WalletConnectControl() {
     revision.current++; attempt.current?.abort();
     const previous = connection.current; connection.current = null;
     setPaymentWallet(null, true, "disconnect");
-    setAccount(null); setBusy(false);
+    setAccount(null); setBusy(false); setSavedSession(false); setQrReconnectAvailable(false);
     setNotice("Wallet disconnected from Enclave.");
     try { await previous?.disconnect(); }
     catch { setNotice("Disconnected here. Remove the Enclave session in your wallet if it is still listed."); }
@@ -171,6 +205,7 @@ export function WalletConnectControl() {
           {account ? `${account.address.slice(0, 6)}…${account.address.slice(-4)}` : "Connect wallet"}
         </button>
         {account && <button type="button" className="wallet-secondary" onClick={() => void disconnect()}>Disconnect wallet</button>}
+        {walletProjectId && qrReconnectAvailable && <button type="button" className="wallet-secondary" disabled={busy} onClick={event => reconnectWithQr(event.currentTarget)} aria-haspopup="dialog" aria-expanded={open}>Reconnect via QR</button>}
         {account && account.chainId !== arc.chainId && account.transport === "browser" && <button type="button" className="wallet-secondary" disabled={switching} onClick={() => void switchNetwork()}>{switching ? "Switching to Arc…" : "Switch to Arc"}</button>}
       </div>
       {account && <span className="wallet-network">{account.name} · {networkName(account.chainId)}</span>}
@@ -190,9 +225,9 @@ export function WalletConnectControl() {
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }}>
-      <div className="wallet-dialog-heading"><h2 id="wallet-dialog-title">{account ? "Connected wallet" : "Connect your wallet"}</h2><button type="button" className="wallet-secondary" onClick={close} aria-label="Close wallet dialog">Close</button></div>
+      <div className="wallet-dialog-heading"><h2 id="wallet-dialog-title">{account ? savedSession ? "Saved wallet session" : "Connected wallet" : "Connect your wallet"}</h2><button type="button" className="wallet-secondary" onClick={close} aria-label="Close wallet dialog">Close</button></div>
       <p id="wallet-dialog-description" className="wallet-note">Choose a wallet to share your address. Connecting does not sign a payment or give Enclave access to your funds.</p>
-      {account ? <div className="wallet-account"><span>{account.name} · {networkName(account.chainId)}</span><code>{account.address}</code><p>{paymentNotice}</p><button type="button" className="wallet-trigger" onClick={() => { void disconnect(); close(); }}>Disconnect wallet</button></div> : <>
+      {account ? <div className="wallet-account"><span>{account.name} · {networkName(account.chainId)}</span><code>{account.address}</code>{savedSession && <p>This session is saved in your browser. Reconnect with QR if your wallet no longer recognizes it.</p>}<p>{paymentNotice}</p>{account.transport === "walletconnect" && walletProjectId && <button type="button" className="wallet-trigger" disabled={busy} onClick={event => reconnectWithQr(event.currentTarget)}>Reconnect via QR</button>}<button type="button" className="wallet-secondary" onClick={() => { void disconnect(); close(); }}>Disconnect wallet</button></div> : <>
         {!busy && <>
           <label className="wallet-label" htmlFor="wallet-search">Search wallets</label>
           <input id="wallet-search" className="wallet-input" type="search" autoComplete="off" maxLength={80} value={search} onChange={event => { setSearch(event.target.value); setPage(1); setDirectory([]); setTotal(0); }} />

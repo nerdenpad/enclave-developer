@@ -1,5 +1,57 @@
 # Release progress — 5 October 2026
 
+## Settled request under review — 5 October 2026
+
+A later **0.10 USDC** request settled, but no new model answer or receipt was
+published. Its durable dispatch claim remains quarantined. A dispatch claim
+does not establish that the model executed the request; the exact failure cause
+is still unknown. Recovery must not repeat the inference or create another
+payment automatically. No refund or compensating transfer has been submitted;
+an operator compensation option is prepared for review.
+
+This failed request is separate from the earlier owner-reported success and the
+four retained operator acceptance calls below. Reported readiness changed from
+ready to not ready during the failed test. Deployment mode remains production;
+readiness and release acceptance are separate from that mode. Earlier signed
+receipts and dated successful checks remain recorded.
+
+Additional fixes were **deployed on 5 October 2026**. A **Reconnect via QR**
+action starts fresh mobile-wallet pairing,
+cancels stale sign-in attempts and preserves the same wallet's workspace and
+existing payment recovery. Reconnecting neither pays nor replays a quarantined
+request. Private failure diagnostics distinguish attestation, attempted dispatch,
+completion and signature checks from local result publication, without recording
+prompts, responses, credentials or raw provider errors. These diagnostics do not
+resolve the earlier failed call retroactively. Strict hardware, policy, TLS and
+signature checks remain enabled; the inference route remains experimental.
+
+The QR frontend rollout changed two reviewed sources in a 185-file source
+inventory. The Linux build and **18 HTTPS asset hash/MIME checks**, canonical
+pages, discovery files and HTTP 404 checks passed. That rollout reported
+`productionReady: false` and `providerAdmissionReady: false`; these are dated
+readings before the later API restart. Frontend TypeScript, **281 unit tests**,
+**53 default browser scenarios** and **18 checkout scenarios** passed: **71
+browser scenarios** in total. Browser scenarios use fixtures and do not replace
+a physical wallet retest.
+
+The backend diagnostics rollout installed **11 reviewed source changes** and
+verified the resulting **297-file source inventory**. Protected configuration
+and accepted evidence were unchanged; the settled request and its quarantined
+claim were also unchanged. Only the API service restarted for this backend
+rollout. Deployment verification at **19:43:00 UTC on 5 October** reported
+`stage: production`, `productionReady: true` and `providerAdmissionReady: true`
+following normal service startup. No payment, inference request or separate
+isolated boot was submitted during this deployment. Backend TypeScript and
+**1,763 tests** passed; one existing Linux-only permission test was skipped on
+Windows. These checks do not close the failed request or its reconciliation.
+
+The [GitHub CI rerun for commit `6ef0244`](https://github.com/nerdenpad/enclave-developer/actions/runs/37294076827)
+passed both jobs, including the browser checks. This closes the previously
+reported CI failure; it does not establish live wallet recovery or paid-provider
+acceptance and is not a CI run for the new diagnostic/QR release. The deployed
+QR recovery still requires a physical OKX retest. Full E1
+operational acceptance remains open.
+
 ## Owner-reported paid wallet retest — 5 October 2026
 
 The project owner reports that one **0.10 USDC** request completed successfully:
@@ -12,8 +64,9 @@ are implemented. Combined local validation passed frontend TypeScript,
 **281 unit tests**, **49 default browser scenarios** and **18 checkout fixture
 scenarios**: **67 browser scenarios** in total. Browser tests use fixtures and
 do not establish live wallet or payment acceptance. No tests were skipped and
-the CI workflow was not changed. A GitHub browser rerun, manual old-session
-recovery and the remaining E1 operational checks are still pending. No transaction or receipt
+the CI workflow was not changed. The GitHub browser rerun subsequently passed;
+manual old-session recovery and the remaining E1 operational checks are still
+pending. No transaction or receipt
 identifier was supplied with the successful request report, so it is recorded
 separately from the four operator calls and 0.40 USDC of retained transaction
 evidence below.
@@ -31,7 +84,9 @@ passed backend checks, frontend typechecking, 275 frontend unit tests and the
 build. Its browser job passed 42 scenarios and
 failed five: one obsolete status-history assertion and four animation checks
 that detected duplicate `site.js` elements. Its three sign-in recovery scenarios
-passed. The fixes retain these checks; a successful CI rerun is not yet recorded.
+passed. The fixes retain these checks; the later
+[successful CI rerun](https://github.com/nerdenpad/enclave-developer/actions/runs/37294076827)
+is recorded above.
 
 ## Operator acceptance — 4 October 2026
 

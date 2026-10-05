@@ -7,7 +7,8 @@ import { isAbsolute } from "node:path";
 import { checkServerIdentity, type PeerCertificate, type TLSSocket } from "node:tls";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { AppError, sha256Hex } from "@enclave/core";
+import { createNearAttestationError, isNearAttestationError, isUnapprovedNearWorkload, nearVerifierErrorCodes, sha256Hex } from "@enclave/core";
+import type { NearAttestationFailure } from "@enclave/core";
 import type { NearAttestationVerifier, NearVerifiedFetch } from "@enclave/core";
 
 export type NvidiaLocalRuntime = { binaryPath: string; libraryPath: string };
@@ -41,53 +42,21 @@ const verdictSchema = z.object({
   archivedHardwareVerified: z.boolean().optional(),
 }).passthrough();
 const normalizeHex = (value: string) => value.replace(/^0x/, "").toLowerCase();
-const verifierErrorCodes = [
-  "ARCHIVE_INVALID", "ARCHIVE_TIME_INVALID", "ARCHIVE_VERDICT_MISMATCH", "INPUT_INVALID", "POLICY_CHANGED", "POLICY_INVALID", "POLICY_EXPIRED",
-  "CPU_BINDING_MISMATCH", "CPU_DEBUG_REJECTED", "CPU_INVALID", "CPU_TCB_REJECTED", "CPU_TYPE_REJECTED", "CPU_VERIFICATION_FAILED",
-  "GATEWAY_COMPOSE_MISMATCH", "GATEWAY_EVENT_LOG_INVALID", "GATEWAY_EVENT_LOG_MISMATCH", "GATEWAY_EVIDENCE_MISSING", "GATEWAY_POLICY_MISMATCH", "GATEWAY_SIGNER_INVALID",
-  "MODEL_EVENT_LOG_MISMATCH", "MODEL_EVIDENCE_DUPLICATE", "MODEL_EVIDENCE_INVALID", "MODEL_EVIDENCE_MISSING", "MODEL_INVALID", "NONCE_MISMATCH",
-  "NVIDIA_GPU_BINDING_INVALID", "NVIDIA_GPU_REJECTED", "NVIDIA_GPU_SET_INVALID", "NVIDIA_IMPLEMENTATION_CHANGED", "NVIDIA_INVALID",
-  "NVIDIA_LOCAL_CONFIG_INVALID", "NVIDIA_LOCAL_OUTPUT_INVALID", "NVIDIA_LOCAL_TIMEOUT", "NVIDIA_LOCAL_UNAVAILABLE", "NVIDIA_NONCE_INVALID",
-  "NVIDIA_RESULT_REJECTED", "NVIDIA_SIGNATURE_INVALID", "NVIDIA_TIME_INVALID", "NVIDIA_UNAVAILABLE", "NVIDIA_VERIFIER_MISMATCH",
-  "SIGNING_ALGORITHM_REJECTED", "TLS_BINDING_MISMATCH", "VERIFICATION_ABORTED", "VERIFICATION_EXPIRED", "VERIFICATION_FAILED", "VERIFICATION_TIMEOUT",
-  "WORKLOAD_ACTIONS_INVALID", "WORKLOAD_BINDING_MISMATCH", "WORKLOAD_COMPOSE_MISMATCH", "WORKLOAD_EVIDENCE_MISSING", "WORKLOAD_MANAGER_UNKNOWN",
-  "WORKLOAD_NONCE_MISMATCH", "WORKLOAD_NOT_APPROVED", "WORKLOAD_VM_MISMATCH",
-] as const;
-export type NearAttestationFailure =
-  | { stage: "verifier"; reason: "aborted" | "output-limit" | "process-failed" | "stdin-failed" | "invalid-output" | "archive-unverified" | "invalid-input" }
-  | { stage: "verifier"; reason: "rejected"; verifierError: typeof verifierErrorCodes[number] }
-  | { stage: "transport"; reason: "aborted" | "tls" | "request" | "response" | "body-limit" | "encoding" | "body-type" }
-  | { stage: "report"; reason: "http-status" | "json" | "shape" | "nonce-binding" | "tls-binding" | "model-binding" }
-  | { stage: "policy"; reason: "unreadable" | "size" | "changed" | "json" }
-  | { stage: "session"; reason: "tls-binding" | "signer" | "signer-set" | "time" | "origin" | "expired" }
-  | { stage: "configuration"; reason: "credentials" };
-// Only this private class carries trusted diagnostics through outer catches.
-// Arbitrary errors, caller details, stderr and provider fields are never copied.
-class NearAttestationError extends AppError {
-  readonly #diagnostic: NearAttestationFailure;
-  constructor(diagnostic: NearAttestationFailure) {
-    super("INFERENCE_ATTESTATION_FAILED", "NEAR hardware attestation or transport verification failed", 503, { attestationFailure: diagnostic });
-    this.#diagnostic = diagnostic;
-  }
-  isUnapprovedWorkload(): boolean {
-    return this.#diagnostic.stage === "verifier" && this.#diagnostic.reason === "rejected"
-      && this.#diagnostic.verifierError === "WORKLOAD_NOT_APPROVED";
-  }
-}
-const unavailable = (diagnostic: NearAttestationFailure = { stage: "transport", reason: "request" }) => new NearAttestationError(diagnostic);
+export type { NearAttestationFailure } from "@enclave/core";
+const unavailable = (diagnostic: NearAttestationFailure = { stage: "transport", reason: "request" }) => createNearAttestationError(diagnostic);
 const tlsErrorCodes = new Set(["ERR_TLS_CERT_ALTNAME_INVALID", "CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "DEPTH_ZERO_SELF_SIGNED_CERT",
   "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "CERT_REVOKED", "ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED"]);
-function transportFailure(error: unknown, signal: RequestInit["signal"]): NearAttestationError {
+function transportFailure(error: unknown, signal: RequestInit["signal"]): ReturnType<typeof createNearAttestationError> {
   if (signal?.aborted) return unavailable({ stage: "transport", reason: "aborted" });
-  if (error instanceof NearAttestationError) return error;
+  if (isNearAttestationError(error)) return error;
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
   return unavailable({ stage: "transport", reason: typeof code === "string" && tlsErrorCodes.has(code) ? "tls" : "request" });
 }
-function fixedVerifierError(output: Buffer): typeof verifierErrorCodes[number] | undefined {
+function fixedVerifierError(output: Buffer): typeof nearVerifierErrorCodes[number] | undefined {
   try {
     const value: unknown = JSON.parse(output.toString("utf8"));
     if (!value || typeof value !== "object" || !("ok" in value) || value.ok !== false || !("error" in value)) return undefined;
-    return verifierErrorCodes.find(code => value.error === code);
+    return nearVerifierErrorCodes.find(code => value.error === code);
   } catch { return undefined; }
 }
 
@@ -233,7 +202,7 @@ export async function runNearVerifier(options: NearProviderOptions, input: unkno
     });
     child.stdin.end(serializedInput);
   }).catch((error: unknown) => {
-    if (error instanceof NearAttestationError) throw error;
+    if (isNearAttestationError(error)) throw error;
     throw unavailable({ stage: "verifier", reason: signal.aborted ? "aborted" : "process-failed" });
   });
 }
@@ -289,7 +258,7 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
           if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable({ stage: "report", reason: "shape" });
           report = value as Record<string, unknown>;
         } catch (error) {
-          if (error instanceof NearAttestationError) throw error;
+          if (isNearAttestationError(error)) throw error;
           throw unavailable({ stage: "report", reason: "json" });
         }
         const gatewayReport = cloud ? report.gateway_attestation as Record<string, unknown> | undefined : report;
@@ -337,7 +306,7 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
         handedOff = true;
         return session;
       } catch (error) {
-        if (error instanceof NearAttestationError) throw error;
+        if (isNearAttestationError(error)) throw error;
         throw transportFailure(error, signal);
       }
       finally { if (!handedOff) bootstrapAgent.destroy(); }
@@ -350,10 +319,10 @@ export function createNearAttestationVerifier(options: NearProviderOptions): Nea
       try { return await verifyAttempt(); }
       catch (error) {
         if (signal.aborted) {
-          if (error instanceof NearAttestationError && !error.isUnapprovedWorkload()) throw error;
+          if (isNearAttestationError(error) && !isUnapprovedNearWorkload(error)) throw error;
           throw unavailable({ stage: "transport", reason: "aborted" });
         }
-        if (cloud || !(error instanceof NearAttestationError) || !error.isUnapprovedWorkload() || attempt + 1 >= attempts) throw error;
+        if (cloud || !(isNearAttestationError(error)) || !isUnapprovedNearWorkload(error) || attempt + 1 >= attempts) throw error;
         // Destroyed by verifyAttempt's finally before waiting or selecting again.
         if (retryPolicy && !(await readRetryPolicy()).equals(retryPolicy)) throw unavailable({ stage: "policy", reason: "changed" });
         try { await delay(100, undefined, { signal }); }

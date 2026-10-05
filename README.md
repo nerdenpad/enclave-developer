@@ -20,10 +20,14 @@ verification and payment status are checked separately on the
 > provider admission and backend readiness as ready. Every request still requires
 > fresh verification. The approved price is **0.10 USDC per request**.
 > On **5 October 2026**, the owner reported one successful paid wallet request
-> with a correct answer and independent receipt and Arc-anchor checks. Fixes for
-> old-session recovery, login messages and browser CI are implemented and passed
-> local validation. A GitHub browser rerun and manual recovery checks remain
-> pending; full E1 operational acceptance is still open.
+> with a correct answer and independent receipt and Arc-anchor checks. A later
+> **0.10 USDC** payment settled without a published model answer or receipt.
+> That request remains quarantined; model execution and the exact failure cause
+> are not established. The [CI rerun for the earlier fixes](https://github.com/nerdenpad/enclave-developer/actions/runs/37294076827)
+> passed both jobs. QR reconnection and private failure diagnostics were
+> deployed on **5 October 2026**. At **19:43 UTC**, normal API startup reported
+> backend and provider readiness as ready; this was not a paid-request test.
+> Physical OKX recovery verification and full E1 operational acceptance remain open.
 > See [deployment status](https://enclaveagent.tech/status),
 > [acceptance evidence](docs/release-progress.md) and
 > [remaining E1 checks](docs/e1-release.md).
