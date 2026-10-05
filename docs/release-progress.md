@@ -18,6 +18,14 @@ identifier was supplied with the successful request report, so it is recorded
 separately from the four operator calls and 0.40 USDC of retained transaction
 evidence below.
 
+The frontend fixes were installed on **5 October 2026**. The isolated Linux
+build and atomic web rollout passed **18 HTTPS asset hash/MIME checks**, canonical
+pages, discovery files and real HTTP 404 handling. Only the web service was
+restarted. The rollout check reported `stage: production`, `productionReady:
+true` and `providerAdmissionReady: true`; those readings do not replace fresh
+admission for future requests. No paid inference or wallet transaction was
+performed during this frontend rollout.
+
 The [GitHub run for commit `abdb239`](https://github.com/nerdenpad/enclave-developer/actions/runs/37227524444)
 passed backend checks, frontend typechecking, 275 frontend unit tests and the
 build. Its browser job passed 42 scenarios and
