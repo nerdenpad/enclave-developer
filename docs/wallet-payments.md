@@ -22,6 +22,24 @@ The backend verifies the signature against its stored message and atomically con
 
 Login supports EOAs only. It grants no balance, administrative privileges or access to another owner's records. Public wallet sessions can inspect their own workspace and use the configured Arc authorized-payment deployment. Agent and administrative mutations remain unavailable to public wallet sessions. Login itself is not a payment or hardware proof.
 
+### Saved-session checks deployed — 5 October 2026
+
+Restored and idle WalletConnect sessions now perform a non-signing connection
+check before requesting a login or payment signature. The UI waits up to 12
+seconds. A response proves peer responsiveness, not approval validity; account,
+network, expiry and capability checks still apply to the signature request.
+
+A missing response preserves the saved approval and lets the user open their
+wallet, retry the connection check or explicitly reconnect via QR. Confirmed
+missing, expired or incompatible approvals retire only the affected topic.
+Late responses cannot revive a cancelled login or replace a newer connection.
+Reconnection does not submit payment or repeat inference.
+
+The scoped rollout passed TypeScript, 296 unit tests, 75 browser scenarios and
+18 HTTPS asset/hash/MIME checks. A browser trace-output collision was rerun
+successfully with an isolated output folder. Physical OKX recovery acceptance
+remains pending. Previously opened tabs need one reload to load this version.
+
 ### QR recovery deployed — 5 October 2026
 
 The **Reconnect via QR** action is deployed. Use it when an old mobile-wallet

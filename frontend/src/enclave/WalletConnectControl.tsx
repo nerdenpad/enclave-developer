@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { connectBrowserWallet, connectWalletConnect, type WalletAccount, type WalletConnection } from "./wallet-session";
+import { connectBrowserWallet, connectWalletConnect, WalletPeerUnavailableError, type WalletAccount, type WalletConnection, type WalletPeerState } from "./wallet-session";
 import { connectionNetworks, discoverWallets, fetchWalletDirectory, networkName, pairingLink, walletError, walletProjectId, type BrowserWallet, type ListedWallet } from "./wallets";
 import "./wallet.css";
 import arc from "./arc-mainnet.json";
@@ -20,6 +20,8 @@ export function WalletConnectControl() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [savedSession, setSavedSession] = useState(false);
+  const [peerState, setPeerState] = useState<WalletPeerState | null>(null);
+  const [checkingPeer, setCheckingPeer] = useState(false);
   const [qrReconnectAvailable, setQrReconnectAvailable] = useState(false);
   const [uri, setUri] = useState("");
   const [qr, setQr] = useState("");
@@ -41,6 +43,26 @@ export function WalletConnectControl() {
   const discovery = useRef<(() => void) | null>(null);
   const alive = useRef(true);
   const restoration = useRef<AbortController | null>(null);
+  const peerSubscription = useRef<(() => void) | null>(null);
+  const peerCheck = useRef<AbortController | null>(null);
+
+  function stopPeerCheck() {
+    peerCheck.current?.abort(); peerCheck.current = null;
+    peerSubscription.current?.(); peerSubscription.current = null;
+    setCheckingPeer(false); setPeerState(null);
+  }
+  function observePeer(result: WalletConnection, current: number) {
+    peerSubscription.current?.(); peerSubscription.current = null;
+    setPeerState(result.peerState ?? null);
+    peerSubscription.current = result.onPeerState?.(state => {
+      if (!alive.current || revision.current !== current || connection.current !== result) return;
+      setPeerState(state);
+      setNotice(state === "checking" ? "Checking whether your wallet is available. Open your wallet. No signature is requested."
+        : state === "unconfirmed" ? "Your wallet has not responded. Open it and retry the connection check, or reconnect via QR."
+        : state === "responsive" ? "Wallet responded. Sign in or approve the payment in your wallet."
+        : "Saved wallet session. Open your wallet before signing in, or reconnect via QR.");
+    }) ?? null;
+  }
 
   useEffect(() => {
     alive.current = true;
@@ -50,12 +72,13 @@ export function WalletConnectControl() {
     void restoreWallet(restoreAbort.signal, (value, reason = "connection") => {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
-      if (!value) { forgetWallet(); connection.current = null; setSavedSession(false); setPaymentWallet(null, true, reason); setNotice("Wallet session is unavailable. Connect again to continue."); }
+      if (!value) { stopPeerCheck(); forgetWallet(); connection.current = null; setSavedSession(false); setPaymentWallet(null, true, reason); setNotice("Wallet session is unavailable. Connect again to continue."); }
       else walletChanged(reason);
     }).then(result => {
       if (!result) return;
       if (!alive.current || current !== revision.current) { result.detach?.(); return; }
       connection.current = result; setPaymentWallet(result); setAccount(result.account);
+      observePeer(result, current);
       const saved = result.account.transport === "walletconnect";
       setSavedSession(saved); setQrReconnectAvailable(saved);
       setNotice(saved ? "Saved wallet session. Open your wallet to sign in, or reconnect with QR." : "Wallet connection restored.");
@@ -64,6 +87,7 @@ export function WalletConnectControl() {
       restoreAbort.abort();
       alive.current = false; revision.current++; attempt.current?.abort(); discovery.current?.();
       discovery.current = null;
+      peerCheck.current?.abort(); peerSubscription.current?.();
       connection.current?.detach?.();
       connection.current = null;
       setPaymentWallet(null, false);
@@ -130,7 +154,7 @@ export function WalletConnectControl() {
     const changed = (value: WalletAccount | null, reason: "connection" | "identity" = "connection") => {
       if (!alive.current || current !== revision.current) return;
       setAccount(value);
-      if (!value) { forgetWallet(); connection.current = null; setSavedSession(false); setPaymentWallet(null, true, reason); setNotice("Wallet disconnected. Connect again to continue."); }
+      if (!value) { stopPeerCheck(); forgetWallet(); connection.current = null; setSavedSession(false); setPaymentWallet(null, true, reason); setNotice("Wallet disconnected. Connect again to continue."); }
       else walletChanged(reason);
     };
     try {
@@ -140,6 +164,7 @@ export function WalletConnectControl() {
         }, changed);
       if (!alive.current || controller.signal.aborted || current !== revision.current) { await result.disconnect(); return; }
       connection.current = result;
+      observePeer(result, current);
       rememberWallet(result, browser);
       setPaymentWallet(result);
       setSavedSession(false); setQrReconnectAvailable(result.account.transport === "walletconnect");
@@ -154,6 +179,7 @@ export function WalletConnectControl() {
     if (busy || !walletProjectId) return;
     returnFocus.current = source ?? trigger.current;
     restoration.current?.abort(); revision.current++; attempt.current?.abort();
+    stopPeerCheck();
     const previous = connection.current; connection.current = null;
     // Detach cancels local signature waits immediately. The old peer may never
     // acknowledge disconnect, so its exact-topic cleanup must not delay a new QR.
@@ -173,6 +199,7 @@ export function WalletConnectControl() {
     forgetWallet();
     void logoutWallet("").catch(() => {});
     revision.current++; attempt.current?.abort();
+    stopPeerCheck();
     const previous = connection.current; connection.current = null;
     setPaymentWallet(null, true, "disconnect");
     setAccount(null); setBusy(false); setSavedSession(false); setQrReconnectAvailable(false);
@@ -183,6 +210,19 @@ export function WalletConnectControl() {
   async function copyUri() {
     try { await navigator.clipboard.writeText(uri); setNotice("Connection link copied. Paste it only into your wallet."); }
     catch { setError("Clipboard access is unavailable. Scan the QR code instead."); }
+  }
+  async function retryPeerCheck() {
+    const selectedConnection = connection.current;
+    if (!selectedConnection?.checkPeer || checkingPeer || busy) return;
+    const current = revision.current, controller = new AbortController();
+    peerCheck.current?.abort(); peerCheck.current = controller;
+    setCheckingPeer(true); setError("");
+    try { await selectedConnection.checkPeer(controller.signal); }
+    catch (failure) {
+      if (alive.current && current === revision.current && connection.current === selectedConnection && !controller.signal.aborted) setNotice(failure instanceof WalletPeerUnavailableError ? failure.message : walletError(failure));
+    } finally {
+      if (alive.current && current === revision.current && peerCheck.current === controller) { peerCheck.current = null; setCheckingPeer(false); }
+    }
   }
   async function switchNetwork() {
     const selectedConnection = connection.current;
@@ -206,6 +246,7 @@ export function WalletConnectControl() {
         </button>
         {account && <button type="button" className="wallet-secondary" onClick={() => void disconnect()}>Disconnect wallet</button>}
         {walletProjectId && qrReconnectAvailable && <button type="button" className="wallet-secondary" disabled={busy} onClick={event => reconnectWithQr(event.currentTarget)} aria-haspopup="dialog" aria-expanded={open}>Reconnect via QR</button>}
+        {account?.transport === "walletconnect" && connection.current?.checkPeer && peerState !== "responsive" && <button type="button" className="wallet-secondary" disabled={busy || checkingPeer} onClick={() => void retryPeerCheck()}>{checkingPeer ? "Checking connection…" : "Retry connection check"}</button>}
         {account && account.chainId !== arc.chainId && account.transport === "browser" && <button type="button" className="wallet-secondary" disabled={switching} onClick={() => void switchNetwork()}>{switching ? "Switching to Arc…" : "Switch to Arc"}</button>}
       </div>
       {account && <span className="wallet-network">{account.name} · {networkName(account.chainId)}</span>}

@@ -8,7 +8,9 @@ import { signArcPayment, type ArcPaymentIntent, type ArcAuthorization } from "./
 const address = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 const addresses = z.array(address).max(100);
 export type WalletAccount = { address: string; chainId: number; name: string; transport: "browser" | "walletconnect" };
+export type WalletPeerState = "saved" | "checking" | "responsive" | "unconfirmed";
 export type WalletConnection = { account: WalletAccount; disconnect: () => Promise<void>; detach?: () => void; topic?: string; switchToArc?: () => Promise<void>; assertActive?: () => void;
+  peerState?: WalletPeerState; checkPeer?: (signal?: AbortSignal) => Promise<void>; onPeerState?: (listener: (state: WalletPeerState) => void) => () => void;
   signIn: (message: string, signal?: AbortSignal) => Promise<`0x${string}`>;
   authorizeArc: (intent: ArcPaymentIntent) => Promise<ArcAuthorization> };
 export type AccountListener = (account: WalletAccount | null, reason?: "connection" | "identity") => void;
@@ -20,13 +22,25 @@ export class WalletSessionUnavailableError extends Error {
     this.name = "WalletSessionUnavailableError";
   }
 }
+/** Lack of a peer response is recoverable; it is not evidence of a deleted approval. */
+export class WalletPeerUnavailableError extends Error {
+  readonly code = "WALLET_PEER_UNAVAILABLE";
+  constructor(readonly reason: "unconfirmed" | "timeout" = "unconfirmed") {
+    super(reason === "timeout" ? "Wallet sign-in timed out. Open your wallet and try again, or reconnect via QR."
+      : "Your wallet did not respond to the connection check. Open your wallet and try again, or reconnect via QR.");
+    this.name = "WalletPeerUnavailableError";
+  }
+}
 const abortError = () => new DOMException("Connection cancelled", "AbortError");
 const LOGIN_TIMEOUT_MS = 60_000;
+const PEER_TIMEOUT_MS = 12_000;
+const PEER_FRESH_MS = 30_000;
 type PendingApproval = (error: Error) => void;
 
 /** Cancel locally without publishing or retrying an eventual wallet signature. */
 function guardLogin<T>(run: (signal: AbortSignal) => Promise<T>, pending: Set<PendingApproval>,
-  signal: AbortSignal | undefined, timedOut: (error: WalletSessionUnavailableError) => void): Promise<T> {
+  signal: AbortSignal | undefined, timedOut: (error: Error) => void,
+  timeoutError: () => Error = () => new WalletSessionUnavailableError("timeout")): Promise<T> {
   return new Promise((resolve, reject) => {
     const operation = new AbortController();
     let settled = false;
@@ -36,7 +50,7 @@ function guardLogin<T>(run: (signal: AbortSignal) => Promise<T>, pending: Set<Pe
       if (settled) return;
       settled = true; cleanup(); operation.abort(); reject(error);
     };
-    const timeout = () => { if (settled) return; const error = new WalletSessionUnavailableError("timeout"); cancel(error); timedOut(error); };
+    const timeout = () => { if (settled) return; const error = timeoutError(); cancel(error); timedOut(error); };
     const aborted = () => { if (signal?.reason?.name === "TimeoutError") timeout(); else cancel(abortError()); };
     if (signal?.aborted) { aborted(); return; }
     pending.add(cancel);
@@ -225,10 +239,26 @@ export function accountFromSession(session: unknown, chainId: number): WalletAcc
 function unavailableRequest(error: unknown): WalletSessionUnavailableError | null {
   const message = typeof error === "string" ? error : error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message : "";
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  if (code === 8000) return null; // An expired request does not revoke the session.
   if (code === 6000) return new WalletSessionUnavailableError();
   if (typeof code === "number" && [5100, 5101, 5102, 5103, 5104].includes(code)) return new WalletSessionUnavailableError("changed");
-  if (/\b(?:session|topic)\b/i.test(message) && /(?:no (?:existing |matching )?session|no matching key|does(?:n't| not) exist|not found|missing|expired|deleted)/i.test(message)) {
+  if (/\b(?:session|topic|keychain)\b/i.test(message) && /(?:no (?:existing |matching )?session|no matching key|does(?:n't| not) exist|not found|missing|expired|deleted)/i.test(message)) {
     return new WalletSessionUnavailableError(/expired/i.test(message) ? "expired" : "missing");
+  }
+  return null;
+}
+
+function unavailableCause(error: unknown, depth = 0): WalletSessionUnavailableError | null {
+  if (error && typeof error === "object" && "code" in error && error.code === 8000) return null;
+  const direct = unavailableRequest(error);
+  if (direct || depth >= 3 || !error || typeof error !== "object") return direct;
+  // Wallet SDKs wrap JSON-RPC errors differently. Inspect only known error
+  // containers; never include their data, params or raw messages in UI copy.
+  for (const key of ["error", "cause", "data"] as const) {
+    if (key in error) {
+      const nested = unavailableCause((error as Record<string, unknown>)[key], depth + 1);
+      if (nested) return nested;
+    }
   }
   return null;
 }
@@ -261,6 +291,7 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     if (proposal.uri) showUri(proposal.uri);
     const session = await abortable(approval, signal);
     const topic = z.string().min(1).max(256).parse(session.topic);
+    if (restore && topic !== restore.topic) throw new WalletSessionUnavailableError("missing");
     const initial = client.session.get(topic);
     const account = accountFromSession(initial, chainId);
     const approvalScope = (value: unknown) => {
@@ -274,14 +305,25 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     let unavailable = new WalletSessionUnavailableError();
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
     const pendingRequests = new Set<PendingApproval>();
+    let peerState: WalletPeerState = restore ? "saved" : "responsive";
+    let responsiveAt = restore ? Number.NEGATIVE_INFINITY : Date.now();
+    let peerProbe: Promise<void> | undefined;
+    const peerListeners = new Set<(state: WalletPeerState) => void>();
+    const reportPeer = (state: WalletPeerState) => {
+      if (!active || peerState === state) return;
+      peerState = state;
+      for (const listener of peerListeners) listener(state);
+    };
     const cleanup = () => {
       if (!active) return;
       active = false;
       clearTimeout(expiryTimer);
       client.off("session_delete", dropped); client.off("session_expire", expired);
       client.off("session_update", updated); client.off("session_event", updated);
+      client.off("session_extend", extended);
       for (const reject of pendingRequests) reject(unavailable);
       pendingRequests.clear();
+      peerListeners.clear();
     };
     const invalidate = (error: WalletSessionUnavailableError) => {
       if (!active) return;
@@ -291,13 +333,13 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
       // A peer-rejected topic may remain in the SDK's local session store even
       // after its UI connection was invalidated. Retire only this exact topic,
       // without blocking or repeating the failed signature request.
-      if (error.reason === "missing" || error.reason === "expired") void retireTopic(topic);
+      if (error.reason === "missing" || error.reason === "expired" || error.reason === "changed") void retireTopic(topic);
     };
     const check = (method?: string) => {
       if (!active) throw unavailable;
       let fresh;
       try { fresh = client.session.get(topic); }
-      catch (cause) { const error = unavailableRequest(cause) ?? new WalletSessionUnavailableError("missing"); invalidate(error); throw error; }
+      catch (cause) { const error = unavailableCause(cause) ?? new WalletSessionUnavailableError("missing"); invalidate(error); throw error; }
       try {
         if (fresh.topic !== topic) throw new WalletSessionUnavailableError("missing");
         if (fresh.expiry <= Date.now() / 1000) throw new WalletSessionUnavailableError("expired");
@@ -357,10 +399,55 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
     };
     const scheduleExpiry = () => {
       const fresh = check();
+      clearTimeout(expiryTimer);
       expiryTimer = setTimeout(() => { try { scheduleExpiry(); } catch { /* check already invalidated the connection. */ } }, Math.min(2_147_483_647, Math.max(0, fresh.expiry * 1000 - Date.now())));
     };
-    const request = (args: { method: string; params: unknown[] }, requestSignal?: AbortSignal): Promise<unknown> => {
-      if (requestSignal?.aborted) return Promise.reject(abortError());
+    const extended = (event: { topic: string }) => {
+      if (!active || event.topic !== topic) return;
+      try { scheduleExpiry(); } catch { /* A fresh local approval check already notified the UI. */ }
+    };
+    const checkPeer = async (signal?: AbortSignal): Promise<void> => {
+      if (signal?.aborted) throw abortError();
+      check();
+      if (Date.now() - responsiveAt < PEER_FRESH_MS) return;
+      reportPeer("checking");
+      if (!peerProbe) {
+        // ping is non-signing protocol liveness only. Its SDK deadline is much
+        // longer than our UI wait, so retain a handler for every late response.
+        const probe = Promise.resolve().then(() => { check(); return client.ping({ topic }); }).then(() => {
+          check(); responsiveAt = Date.now(); reportPeer("responsive");
+        }, cause => {
+          if (!active) throw unavailable;
+          const error = unavailableCause(cause);
+          if (error) { invalidate(error); void retireTopic(topic); throw error; }
+          reportPeer("unconfirmed"); throw new WalletPeerUnavailableError();
+        });
+        peerProbe = probe;
+        void probe.then(() => { if (peerProbe === probe) peerProbe = undefined; }, () => { if (peerProbe === probe) peerProbe = undefined; });
+      }
+      const probe = peerProbe;
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const finish = (error?: unknown) => {
+          if (settled) return;
+          settled = true; clearTimeout(timer); pendingRequests.delete(cancel); signal?.removeEventListener("abort", aborted);
+          if (error) reject(error); else resolve();
+        };
+        const cancel = (error: Error) => finish(error);
+        const aborted = () => { reportPeer("unconfirmed"); finish(abortError()); };
+        const timer = setTimeout(() => { reportPeer("unconfirmed"); finish(new WalletPeerUnavailableError()); }, PEER_TIMEOUT_MS);
+        pendingRequests.add(cancel); signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) { aborted(); return; }
+        void probe.then(() => finish(), error => finish(error));
+      });
+      if (signal?.aborted) throw abortError();
+      check();
+    };
+    const request = async (args: { method: string; params: unknown[] }, requestSignal?: AbortSignal): Promise<unknown> => {
+      if (requestSignal?.aborted) throw abortError();
+      check(args.method);
+      await checkPeer(requestSignal);
+      if (requestSignal?.aborted) throw abortError();
       check(args.method);
       return new Promise((resolve, reject) => {
         let settled = false;
@@ -375,34 +462,34 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
         requestSignal?.addEventListener("abort", aborted, { once: true });
         const failed = (cause: unknown) => {
           if (settled) return;
-          const error = unavailableRequest(cause);
-          if (error) { invalidate(error); finish(false, error); return; }
+          const error = unavailableCause(cause);
+          if (error) { invalidate(error); void retireTopic(topic); finish(false, error); return; }
           try { check(args.method); finish(false, cause); } catch (error) { finish(false, error); }
         };
         if (requestSignal?.aborted) { aborted(); return; }
         try {
           void client.request({ topic, chainId: `eip155:${arc.chainId}`, request: args }).then(value => {
             if (settled) return;
-            try { check(args.method); finish(true, value); } catch (error) { finish(false, error); }
+            try { check(args.method); responsiveAt = Date.now(); reportPeer("responsive"); finish(true, value); } catch (error) { finish(false, error); }
           }, failed).catch(error => finish(false, error));
         } catch (error) { failed(error); }
       });
     };
     client.on("session_delete", dropped); client.on("session_expire", expired);
     client.on("session_update", updated); client.on("session_event", updated);
+    client.on("session_extend", extended);
     scheduleExpiry();
     changed(account);
-    return { assertActive: () => { check(); }, get account() { check(); return account; }, disconnect, detach: cleanup, topic, signIn: (message, signal) => guardLogin(async loginSignal => {
+    return { assertActive: () => { check(); }, get account() { check(); return account; }, get peerState() { return peerState; }, checkPeer,
+      onPeerState: listener => { peerListeners.add(listener); return () => { peerListeners.delete(listener); }; },
+      disconnect, detach: cleanup, topic, signIn: (message, signal) => guardLogin(async loginSignal => {
       if (loginSignal.aborted) throw abortError();
       check("personal_sign");
       if (chainId !== arc.chainId) throw Error("Reconnect your wallet on Arc Mainnet");
       const signature = await signLoginMessage(message, account.address, args => request(args, loginSignal));
       if (loginSignal.aborted) throw abortError();
       check("personal_sign"); return signature;
-    }, pendingRequests, signal, error => {
-      invalidate(error);
-      void retireTopic(topic);
-    }), authorizeArc: async intent => {
+    }, pendingRequests, signal, () => { responsiveAt = Number.NEGATIVE_INFINITY; reportPeer("unconfirmed"); }, () => new WalletPeerUnavailableError("timeout")), authorizeArc: async intent => {
       check("eth_signTypedData_v4");
       if (chainId !== arc.chainId || account.address.toLowerCase() !== intent.payer.toLowerCase()) throw Error("Reconnect the payer wallet on Arc Mainnet");
       const result = await signArcPayment(intent, request);
@@ -412,6 +499,13 @@ export async function connectWalletConnect(projectId: string, chainId: number, s
   } catch (error) {
     cancelPairing();
     if (acceptedTopic && !restore) await retireTopic(acceptedTopic);
+    if (restore && !signal.aborted && (unavailableCause(error)
+      || error instanceof Error && /^(?:Required wallet capabilities not approved|Selected wallet changed)$/.test(error.message))) {
+      // Restoration is a local lookup, so these specific failures prove the
+      // saved approval unusable. A cancelled restore or SDK load failure does
+      // not revoke an otherwise valid session.
+      void retireTopic(restore.topic);
+    }
     // Always consume eventual rejection even when cancelled before awaiting approval.
     void approval.catch(() => {});
     throw error;

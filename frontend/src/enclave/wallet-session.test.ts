@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type SignClient from "@walletconnect/sign-client";
-import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId, switchBrowserToArc, WalletSessionUnavailableError } from "./wallet-session";
+import { accountFromSession, connectBrowserWallet, connectWalletConnect, parseChainId, switchBrowserToArc, WalletSessionUnavailableError, WalletPeerUnavailableError } from "./wallet-session";
 import type { BrowserProvider } from "./wallets";
 import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
@@ -22,11 +22,12 @@ function wc() {
   type SessionEvent = { topic: string; params?: { namespaces?: unknown; chainId?: string; event?: { name: string; data: unknown } } };
   const listeners = new Map<string, (value: SessionEvent) => void>();
   const disconnect = vi.fn().mockResolvedValue(undefined), pairingDisconnect = vi.fn().mockResolvedValue(undefined);
+  const ping = vi.fn().mockResolvedValue(undefined);
   const request = vi.fn<({ topic, chainId, request }: { topic: string; chainId: string; request: { method: string; params: unknown[] } }) => Promise<unknown>>().mockResolvedValue(undefined);
   const connect = vi.fn().mockResolvedValue({ uri: `wc:${"a".repeat(64)}@2?symKey=test`, approval: () => gate.promise.then(value => { sessions.set(value.topic, value); return value; }) });
   const get = vi.fn((topic: string) => { const value = sessions.get(topic); if (!value) throw Error(`No matching key. session topic doesn't exist: ${topic}`); return value; });
-  const client = { connect, disconnect, request, session: { get }, core: { pairing: { disconnect: pairingDisconnect } }, on: (event: string, fn: (value: SessionEvent) => void) => listeners.set(event, fn), off: (event: string) => listeners.delete(event) };
-  return { gate, sessions, get, request, listeners, disconnect, pairingDisconnect, connect, getClient: async () => client as unknown as SignClient };
+  const client = { connect, disconnect, ping, request, session: { get }, core: { pairing: { disconnect: pairingDisconnect } }, on: (event: string, fn: (value: SessionEvent) => void) => listeners.set(event, fn), off: (event: string) => listeners.delete(event) };
+  return { gate, sessions, get, request, ping, listeners, disconnect, pairingDisconnect, connect, getClient: async () => client as unknown as SignClient };
 }
 const signer = privateKeyToAccount(`0x${"11".repeat(32)}`);
 function arcSession(topic = "topic") { const live = session(); live.topic = topic; live.namespaces.eip155.accounts = [`eip155:5042:${signer.address}`]; return live; }
@@ -36,6 +37,13 @@ async function approvedWallet(live = arcSession()) {
   const pending = connectWalletConnect("a".repeat(32), 5042, new AbortController().signal, vi.fn(), changed, mock.getClient);
   mock.gate.resolve(live);
   return { mock, changed, live, connection: await pending };
+}
+async function restoredWallet() {
+  const mock = wc(), changed = vi.fn(), live = arcSession(); live.expiry += 600;
+  mock.sessions.set(live.topic, live);
+  const connection = await connectWalletConnect("a".repeat(32), 5042, new AbortController().signal, vi.fn(), changed, mock.getClient, { topic: live.topic, address: signer.address });
+  changed.mockClear();
+  return { mock, changed, live, connection };
 }
 function loginMessage() { return createSiweMessage({ domain: "enclaveagent.tech", address: signer.address, uri: "https://enclaveagent.tech/dashboard",
   version: "1", chainId: 5042, nonce: "a".repeat(48), issuedAt: new Date(), expirationTime: new Date(Date.now() + 300_000),
@@ -216,6 +224,7 @@ describe("WalletConnect lifecycle", () => {
   });
   it.each(["account", "chain", "expiry", "method", "topic"])("rejects a silently changed live %s before requesting a signature", async change => {
     const { mock, changed, live, connection } = await approvedWallet();
+    mock.sessions.set("unrelated", arcSession("unrelated"));
     if (change === "account") live.namespaces.eip155.accounts = [`eip155:5042:${second}`];
     if (change === "chain") live.namespaces.eip155.accounts = [`eip155:1:${signer.address}`];
     if (change === "expiry") live.expiry = Math.floor(Date.now() / 1000) - 1;
@@ -225,6 +234,8 @@ describe("WalletConnect lifecycle", () => {
     await expect(connection.authorizeArc(intent())).rejects.toThrow(WalletSessionUnavailableError);
     expect(mock.request).not.toHaveBeenCalled(); expect(changed).toHaveBeenCalledExactlyOnceWith(...(change === "expiry" || change === "topic" ? [null] : [null, "identity"]));
     expect(mock.listeners.size).toBe(0);
+    expect(mock.disconnect).toHaveBeenCalledExactlyOnceWith({ topic: "topic", reason: { code: 6000, message: "User disconnected" } });
+    expect(mock.sessions.has("unrelated")).toBe(true); expect(mock.pairingDisconnect).not.toHaveBeenCalled();
   });
   it("checks the fresh login capability rather than the original approval", async () => {
     const { mock, changed, live, connection } = await approvedWallet();
@@ -275,7 +286,7 @@ describe("WalletConnect lifecycle", () => {
     mock.sessions.set("topic", renewed);
     mock.listeners.get(event)?.({ topic: "topic", params: event === "session_update" ? { namespaces: renewed.namespaces } : { chainId: "eip155:5042", event: { name: "accountsChanged", data: [signer.address] } } });
     expect(changed).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
-    expect(() => connection.assertActive?.()).not.toThrow(); expect(mock.listeners.size).toBe(4);
+    expect(() => connection.assertActive?.()).not.toThrow(); expect(mock.listeners.size).toBe(5);
     gate.resolve(await signer.signTypedData(receiveData(payment))); await expect(pending).resolves.toMatchObject({ from: signer.address });
     connection.detach?.();
   });
@@ -345,7 +356,24 @@ describe("WalletConnect lifecycle", () => {
     await expect(connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), async () => client, { topic: live.topic, address: second })).rejects.toThrow();
     live.expiry = 0;
     await expect(connectWalletConnect("a".repeat(32), 1, new AbortController().signal, vi.fn(), vi.fn(), async () => client, { topic: live.topic, address: first })).rejects.toThrow();
-    expect(mock.connect).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+    expect(mock.connect).not.toHaveBeenCalled(); expect(mock.disconnect).toHaveBeenCalledTimes(2);
+    expect(mock.disconnect.mock.calls.every(([args]) => args.topic === live.topic)).toBe(true);
+  });
+  it.each(["missing", "capability"])("retires a positively %s local restore and leaves unrelated approvals untouched", async kind => {
+    const mock = wc(), live = arcSession(); mock.sessions.set("unrelated", arcSession("unrelated"));
+    if (kind === "capability") { live.namespaces.eip155.methods = ["personal_sign"]; mock.sessions.set(live.topic, live); }
+    await expect(connectWalletConnect("a".repeat(32), 5042, new AbortController().signal, vi.fn(), vi.fn(), mock.getClient,
+      { topic: live.topic, address: signer.address })).rejects.toThrow();
+    expect(mock.connect).not.toHaveBeenCalled(); expect(mock.ping).not.toHaveBeenCalled(); expect(mock.request).not.toHaveBeenCalled();
+    expect(mock.disconnect).toHaveBeenCalledExactlyOnceWith({ topic: live.topic, reason: { code: 6000, message: "User disconnected" } });
+    expect(mock.sessions.has("unrelated")).toBe(true); expect(mock.pairingDisconnect).not.toHaveBeenCalled();
+  });
+  it("does not retire a valid local session when restoration is cancelled during its lookup", async () => {
+    const mock = wc(), live = arcSession(), abort = new AbortController(); mock.sessions.set(live.topic, live);
+    mock.get.mockImplementationOnce(() => { abort.abort(); return live; });
+    await expect(connectWalletConnect("a".repeat(32), 5042, abort.signal, vi.fn(), vi.fn(), mock.getClient,
+      { topic: live.topic, address: signer.address })).rejects.toMatchObject({ name: "AbortError" });
+    expect(mock.sessions.has(live.topic)).toBe(true); expect(mock.disconnect).not.toHaveBeenCalled(); expect(mock.ping).not.toHaveBeenCalled();
   });
   it("requests only the connection scope and disconnects when account approval changes", async () => {
     const mock = wc(), changed = vi.fn();
@@ -379,6 +407,106 @@ describe("WalletConnect lifecycle", () => {
     const pending = connectWalletConnect("a".repeat(32), 8453, new AbortController().signal, vi.fn(), changed, mock.getClient);
     mock.gate.resolve(session()); await expect(pending).rejects.toThrow();
     expect(mock.disconnect).toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled();
+  });
+});
+
+describe("WalletConnect peer liveness before signing", () => {
+  it("reschedules only its own extended session expiry without signing or dropping a valid approval", async () => {
+    vi.useFakeTimers(); const { mock, changed, live, connection } = await approvedWallet(); changed.mockClear();
+    live.expiry += 600; mock.listeners.get("session_extend")?.({ topic: "unrelated" });
+    mock.listeners.get("session_extend")?.({ topic: "topic" }); expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000); expect(() => connection.assertActive?.()).not.toThrow();
+    expect(changed).not.toHaveBeenCalled(); expect(mock.request).not.toHaveBeenCalled(); expect(mock.ping).not.toHaveBeenCalled();
+    connection.detach?.(); expect(mock.listeners.size).toBe(0); expect(vi.getTimerCount()).toBe(0);
+  });
+  it("keeps a restored local session saved until a non-signing peer response, then requests just one signature", async () => {
+    vi.stubGlobal("location", { origin: "https://enclaveagent.tech" });
+    const { mock, changed, connection } = await restoredWallet(), gate = deferred<void>(), states = vi.fn(), message = loginMessage();
+    mock.ping.mockReturnValueOnce(gate.promise); mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    connection.onPeerState?.(states);
+    expect(connection.peerState).toBe("saved"); expect(mock.ping).not.toHaveBeenCalled(); expect(mock.connect).not.toHaveBeenCalled();
+    const pending = connection.signIn(message);
+    await vi.waitFor(() => expect(mock.ping).toHaveBeenCalledExactlyOnceWith({ topic: "topic" }));
+    expect(connection.peerState).toBe("checking"); expect(mock.request).not.toHaveBeenCalled();
+    gate.resolve(); await expect(pending).resolves.toMatch(/^0x/);
+    expect(states.mock.calls).toEqual([["checking"], ["responsive"]]); expect(changed).not.toHaveBeenCalled();
+    expect(mock.request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ topic: "topic", request: expect.objectContaining({ method: "personal_sign" }) }));
+    connection.detach?.();
+  });
+
+  it("does not ping a fresh QR approval, but checks an idle topic before its next payment signature", async () => {
+    vi.useFakeTimers(); vi.stubGlobal("location", { origin: "https://enclaveagent.tech" });
+    const { mock, connection } = await approvedWallet(), message = loginMessage();
+    mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    await connection.signIn(message); expect(mock.ping).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const payment = intent(); mock.request.mockResolvedValueOnce(await signer.signTypedData(receiveData(payment)));
+    await connection.authorizeArc(payment);
+    expect(mock.ping).toHaveBeenCalledExactlyOnceWith({ topic: "topic" }); expect(mock.request).toHaveBeenCalledTimes(2); connection.detach?.();
+  });
+
+  it("bounds a silent saved peer at twelve seconds without signing, forgetting approval or notifying identity loss", async () => {
+    vi.useFakeTimers(); vi.stubGlobal("location", { origin: "https://enclaveagent.tech" });
+    const { mock, changed, connection } = await restoredWallet(), gate = deferred<void>(); mock.ping.mockReturnValueOnce(gate.promise);
+    const pending = connection.signIn(loginMessage()), rejected = expect(pending).rejects.toThrow(WalletPeerUnavailableError);
+    await vi.advanceTimersByTimeAsync(11_999); expect(mock.request).not.toHaveBeenCalled(); expect(connection.peerState).toBe("checking");
+    await vi.advanceTimersByTimeAsync(1); await rejected;
+    expect(connection.peerState).toBe("unconfirmed"); expect(() => connection.assertActive?.()).not.toThrow();
+    expect(mock.sessions.has("topic")).toBe(true); expect(mock.disconnect).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled();
+    gate.resolve(); await vi.advanceTimersByTimeAsync(0);
+    expect(connection.peerState).toBe("responsive"); expect(mock.request).not.toHaveBeenCalled(); // A late ACK cannot revive the cancelled sign-in.
+    const message = loginMessage(); mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    await connection.signIn(message); expect(mock.ping).toHaveBeenCalledTimes(1); expect(mock.request).toHaveBeenCalledTimes(1); connection.detach?.();
+  });
+
+  it.each(["offline", "request-expired"])("preserves a valid local topic after a %s ping rejection and allows an explicit retry", async kind => {
+    const { mock, changed, connection } = await restoredWallet();
+    mock.ping.mockRejectedValueOnce(kind === "offline" ? Error("Relay unavailable") : { code: 8000, message: "Session request expired" });
+    await expect(connection.checkPeer?.()).rejects.toThrow(WalletPeerUnavailableError);
+    expect(connection.peerState).toBe("unconfirmed"); expect(mock.disconnect).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled(); expect(mock.request).not.toHaveBeenCalled();
+    await connection.checkPeer?.(); expect(connection.peerState).toBe("responsive"); expect(mock.ping).toHaveBeenCalledTimes(2); connection.detach?.();
+  });
+
+  it.each([
+    { error: { code: -32000, message: "There is no existing session matching the topic" } },
+    { cause: { data: { message: "No matching key. keychain topic not found" } } },
+  ])("retires only a definitely rejected old topic before either login or payment is signed", async cause => {
+    const { mock, changed, connection } = await restoredWallet(), cleanup = deferred<void>();
+    mock.sessions.set("unrelated", arcSession("unrelated")); mock.disconnect.mockReturnValueOnce(cleanup.promise); mock.ping.mockRejectedValueOnce(cause);
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: "missing" });
+    expect(mock.request).not.toHaveBeenCalled(); expect(changed).toHaveBeenCalledExactlyOnceWith(null);
+    expect(mock.disconnect).toHaveBeenCalledExactlyOnceWith({ topic: "topic", reason: { code: 6000, message: "User disconnected" } });
+    expect(mock.sessions.has("unrelated")).toBe(true); expect(mock.pairingDisconnect).not.toHaveBeenCalled(); cleanup.resolve();
+  });
+
+  it("shares one SDK ping across callers and never signs after their cancellation or after replacement", async () => {
+    vi.stubGlobal("location", { origin: "https://enclaveagent.tech" });
+    const { mock, changed, connection } = await restoredWallet(), gate = deferred<void>(), abort = new AbortController(), states = vi.fn();
+    mock.ping.mockReturnValueOnce(gate.promise); connection.onPeerState?.(states);
+    const login = connection.signIn(loginMessage(), abort.signal), rejected = expect(login).rejects.toMatchObject({ name: "AbortError" });
+    const check = connection.checkPeer?.(), cancelled = expect(check).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.ping).toHaveBeenCalledTimes(1)); abort.abort(); await rejected;
+    connection.detach?.(); await cancelled; const notifications = states.mock.calls.length;
+    const replacement = await approvedWallet(arcSession("replacement")); gate.reject(Error("There is no existing session matching the topic"));
+    await Promise.resolve(); await Promise.resolve();
+    expect(states).toHaveBeenCalledTimes(notifications); expect(changed).not.toHaveBeenCalled(); expect(mock.request).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+    expect(() => replacement.connection.assertActive?.()).not.toThrow(); replacement.connection.detach?.();
+  });
+
+  it.each(["session_delete", "session_expire"])("cancels a pending peer check immediately on %s and ignores its late ACK", async event => {
+    const { mock, changed, connection } = await restoredWallet(), gate = deferred<void>(); mock.ping.mockReturnValueOnce(gate.promise);
+    const pending = connection.authorizeArc(intent()), rejected = expect(pending).rejects.toThrow(WalletSessionUnavailableError);
+    await vi.waitFor(() => expect(mock.ping).toHaveBeenCalledTimes(1)); mock.listeners.get(event)?.({ topic: "topic" }); await rejected;
+    gate.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(mock.request).not.toHaveBeenCalled(); expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.disconnect).toHaveBeenCalledTimes(1); expect(mock.listeners.size).toBe(0);
+  });
+
+  it("does not treat a positive ping as permission proof when the actual signing request rejects its topic", async () => {
+    const { mock, changed, connection } = await restoredWallet();
+    mock.request.mockRejectedValueOnce({ error: { message: "There is no existing session matching the topic" } });
+    await expect(connection.authorizeArc(intent())).rejects.toMatchObject({ reason: "missing" });
+    expect(mock.ping).toHaveBeenCalledTimes(1); expect(mock.request).toHaveBeenCalledTimes(1); expect(changed).toHaveBeenCalledExactlyOnceWith(null);
+    expect(mock.disconnect).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -438,24 +566,24 @@ describe("bounded wallet sign-in approval", () => {
     expect(changed).toHaveBeenCalledTimes(notifications); expect(mock.request).toHaveBeenCalledTimes(1);
   });
 
-  it("times out a hung WalletConnect personal_sign at 60 seconds and requires explicit reconnect", async () => {
+  it("times out a hung WalletConnect personal_sign at 60 seconds without deleting a slow wallet's approval", async () => {
     vi.useFakeTimers(); signInLocation();
     const { mock, changed, connection } = await approvedWallet(longSession()), gate = deferred<unknown>();
     mock.request.mockReturnValueOnce(gate.promise); changed.mockClear();
-    const pending = connection.signIn(loginMessage()), rejected = expect(pending).rejects.toMatchObject({ code: "WALLET_SESSION_UNAVAILABLE", reason: "timeout" });
-    await Promise.resolve(); expect(mock.request).toHaveBeenCalledTimes(1);
+    const pending = connection.signIn(loginMessage()), rejected = expect(pending).rejects.toMatchObject({ code: "WALLET_PEER_UNAVAILABLE", reason: "timeout" });
+    await vi.advanceTimersByTimeAsync(0); expect(mock.request).toHaveBeenCalledTimes(1);
     let completed = false; void pending.then(() => { completed = true; }, () => { completed = true; });
     await vi.advanceTimersByTimeAsync(59_999); expect(completed).toBe(false);
     await vi.advanceTimersByTimeAsync(1); await rejected;
-    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.disconnect).toHaveBeenCalledTimes(1);
-    expect(mock.listeners.size).toBe(0); expect(vi.getTimerCount()).toBe(0);
-    await expect(connection.signIn(loginMessage())).rejects.toThrow(WalletSessionUnavailableError);
-    expect(mock.request).toHaveBeenCalledTimes(1);
+    expect(changed).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+    expect(connection.peerState).toBe("unconfirmed"); expect(() => connection.assertActive?.()).not.toThrow();
+    expect(mock.listeners.size).toBe(5); expect(vi.getTimerCount()).toBe(1);
     gate.resolve(await signer.signMessage({ message: loginMessage() })); await Promise.resolve(); await Promise.resolve();
-    expect(changed).toHaveBeenCalledTimes(1);
-    const fresh = await approvedWallet(longSession()), message = loginMessage();
-    fresh.mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
-    await expect(fresh.connection.signIn(message)).resolves.toMatch(/^0x/); fresh.connection.detach?.();
+    expect(changed).not.toHaveBeenCalled();
+    const message = loginMessage(); mock.request.mockResolvedValueOnce(await signer.signMessage({ message }));
+    await expect(connection.signIn(message)).resolves.toMatch(/^0x/);
+    expect(mock.ping).toHaveBeenCalledExactlyOnceWith({ topic: "topic" }); expect(mock.request).toHaveBeenCalledTimes(2);
+    connection.detach?.(); expect(vi.getTimerCount()).toBe(0);
   });
 
   it("consumes a late missing-topic failure after cancellation without invalidating a later explicit login", async () => {
@@ -472,16 +600,17 @@ describe("bounded wallet sign-in approval", () => {
     expect(mock.request).toHaveBeenCalledTimes(2); expect(mock.disconnect).not.toHaveBeenCalled(); connection.detach?.();
   });
 
-  it("treats the caller's earlier whole-flow timeout as an explicit reconnect requirement", async () => {
+  it("cancels the caller's earlier whole-flow timeout without retiring the approved WalletConnect topic", async () => {
     signInLocation();
     const { mock, changed, connection } = await approvedWallet(longSession()), gate = deferred<unknown>(), cancel = new AbortController();
     mock.request.mockReturnValueOnce(gate.promise); changed.mockClear();
     const pending = connection.signIn(loginMessage(), cancel.signal), rejected = expect(pending).rejects.toMatchObject({ reason: "timeout" });
     await vi.waitFor(() => expect(mock.request).toHaveBeenCalledTimes(1));
     cancel.abort(new DOMException("Login timed out", "TimeoutError")); await rejected;
-    expect(changed).toHaveBeenCalledExactlyOnceWith(null); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    expect(changed).not.toHaveBeenCalled(); expect(mock.disconnect).not.toHaveBeenCalled();
+    expect(connection.peerState).toBe("unconfirmed"); expect(() => connection.assertActive?.()).not.toThrow();
     gate.reject(Error("late SDK failure")); await Promise.resolve(); await Promise.resolve();
-    expect(mock.request).toHaveBeenCalledTimes(1); expect(mock.disconnect).toHaveBeenCalledTimes(1);
+    expect(mock.request).toHaveBeenCalledTimes(1); expect(mock.disconnect).not.toHaveBeenCalled(); connection.detach?.();
   });
 
   it("does not request a signature or invalidate an approved session for a pre-cancelled login", async () => {

@@ -16,13 +16,20 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function reconnectFixture(page: Page, options: { resume?: boolean; rejectPayment?: boolean } = {}) {
+async function reconnectFixture(page: Page, options: { resume?: boolean; rejectPayment?: boolean; peer?: "silent" | "missing" } = {}) {
   const requests: { path: string; body: Record<string, unknown> | null; headers: Record<string, string> }[] = [];
   const walletCalls: { topic: string; method: string }[] = [], pairings: { topic: string; approval: ReturnType<typeof deferred<string>> }[] = [];
   const signatures: { message: string; approval: ReturnType<typeof deferred<Hex>> }[] = [];
+  const peerProbes: { topic: string; reply: ReturnType<typeof deferred<void>> }[] = [];
   const cleanups: { topic: string; done: ReturnType<typeof deferred<void>> }[] = [], pairingCleanups: string[] = [];
   const challenges = new Map<string, string>(), loginToken = `enws_${"ab".repeat(32)}`;
   let loginReady = Boolean(options.resume), challengeNumber = 0;
+  await page.exposeBinding("reconnectFixturePing", (_source, topic: string) => {
+    const reply = deferred<void>(); peerProbes.push({ topic, reply });
+    if (options.peer === "missing" && topic === oldTopic) reply.reject({ error: { message: "There is no existing session matching the topic" } });
+    else if (options.peer !== "silent" || topic !== oldTopic) reply.resolve();
+    return reply.promise;
+  });
   await page.exposeBinding("reconnectFixtureApproval", (_source, topic: string) => {
     const approval = deferred<string>(); pairings.push({ topic, approval }); return approval.promise;
   });
@@ -61,6 +68,7 @@ async function reconnectFixture(page: Page, options: { resume?: boolean; rejectP
         for (const handler of listeners.get("session_delete") ?? []) handler({ topic });
       },
       request: (args: unknown) => Reflect.get(window, "reconnectFixtureRequest")(args),
+      ping: ({ topic }: { topic: string }) => Reflect.get(window, "reconnectFixturePing")(topic),
       on: (name: string, handler: Handler) => { let set = listeners.get(name); if (!set) listeners.set(name, set = new Set()); set.add(handler); },
       off: (name: string, handler: Handler) => { listeners.get(name)?.delete(handler); },
       core: { pairing: { disconnect: async ({ topic }: { topic: string }) => { await Reflect.get(window, "reconnectFixturePairingDisconnect")(topic); } } },
@@ -147,8 +155,66 @@ async function reconnectFixture(page: Page, options: { resume?: boolean; rejectP
     expect(await page.evaluate(() => Reflect.get(window, "reconnectFixturePageId"))).toBe(pageId);
     expect(requests.filter(row => row.path === "/v1/x402/settle" || row.path === "/v1/inference" && row.headers["x-payment"])).toEqual([]);
   }
-  return { requests, walletCalls, pairings, cleanups, pairingCleanups, reconnect, openQr, approveQr, beginSignature, approveSignature, assertNoReloadOrPayment };
+  return { requests, walletCalls, pairings, cleanups, pairingCleanups, peerProbes, reconnect, openQr, approveQr, beginSignature, approveSignature, assertNoReloadOrPayment };
 }
+
+test("a silent saved wallet can retry its connection check without signing or clearing its workspace", async ({ page }) => {
+  await page.clock.install(); const f = await reconnectFixture(page, { resume: true, peer: "silent" });
+  await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  const retry = page.locator(".wallet-control").getByRole("button", { name: "Retry connection check", exact: true });
+  await retry.click(); await expect.poll(() => f.peerProbes.length).toBe(1);
+  await expect(page.locator(".wallet-notice")).toContainText("No signature is requested.");
+  await page.clock.runFor(12_001); await expect(retry).toBeEnabled();
+  await expect(page.locator(".wallet-notice")).toContainText("Open your wallet and try again, or reconnect via QR.");
+  await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  expect(f.walletCalls).toEqual([]); expect(f.cleanups).toEqual([]);
+  await retry.click(); await page.clock.runFor(1); expect(f.peerProbes).toHaveLength(1);
+  f.peerProbes[0]!.reply.resolve(); await expect(page.locator(".wallet-notice")).toContainText("Wallet responded.");
+  await expect(retry).toHaveCount(0);
+  expect(f.walletCalls).toEqual([]); expect(f.requests.filter(row => /\/(challenge|verify|logout)$/.test(row.path))).toEqual([]);
+  await f.assertNoReloadOrPayment();
+});
+
+test("a silent old session blocks signing, releases sign-in after twelve seconds and offers QR without a reload", async ({ page }) => {
+  await page.clock.install(); const f = await reconnectFixture(page, { peer: "silent" });
+  await page.locator("#wallet-login").click(); await expect.poll(() => f.peerProbes.length).toBe(1);
+  await expect(page.locator("#wallet-login")).toBeDisabled(); expect(f.walletCalls).toEqual([]);
+  await page.clock.runFor(12_001); await expect(page.locator("#wallet-login")).toBeEnabled();
+  await expect(page.locator("#connection-error")).toContainText("Open your wallet and try again, or reconnect via QR.");
+  await expect(page.locator("#wallet-login-status")).toHaveText("Sign-in was not completed. You can try again.");
+  expect(f.walletCalls).toEqual([]); expect(f.cleanups).toEqual([]);
+  await f.openQr(); await f.approveQr(); await expect(page.locator(".wallet-dialog")).not.toBeVisible();
+  await f.beginSignature(0); f.peerProbes[0]!.reply.resolve(); await page.clock.runFor(25);
+  await expect(page.locator("#wallet-login")).toBeDisabled(); expect(f.walletCalls.map(row => row.method)).toEqual(["personal_sign"]);
+  await f.approveSignature(0); await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  expect(f.requests.filter(row => row.path.endsWith("/verify"))).toHaveLength(1); expect(f.peerProbes).toHaveLength(1);
+  await f.assertNoReloadOrPayment();
+});
+
+test("a definitely missing old topic retires once and opens a fresh QR before any signature request", async ({ page }) => {
+  const f = await reconnectFixture(page, { peer: "missing" });
+  await page.locator("#wallet-login").click(); await expect.poll(() => f.peerProbes.length).toBe(1);
+  await expect(page.locator("#wallet-login")).toBeEnabled(); await expect(page.locator(".wallet-network")).toHaveCount(0);
+  await expect.poll(() => f.cleanups.length).toBe(1); expect(f.cleanups[0]!.topic).toBe(oldTopic); expect(f.walletCalls).toEqual([]);
+  await f.openQr(); await f.approveQr(); await expect(page.locator(".wallet-dialog")).not.toBeVisible();
+  await f.beginSignature(0); await f.approveSignature(0); await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  f.cleanups[0]!.done.resolve(); await expect(page.locator(".wallet-network")).toHaveText("OKX reconnect fixture · Arc Mainnet");
+  expect(f.cleanups).toHaveLength(1); expect(f.walletCalls.map(row => row.method)).toEqual(["personal_sign"]);
+  await f.assertNoReloadOrPayment();
+});
+
+test("QR reconnect cancels a pending old peer check and its late rejection cannot invalidate the replacement", async ({ page }) => {
+  const f = await reconnectFixture(page, { peer: "silent" });
+  await page.locator("#wallet-login").click(); await expect.poll(() => f.peerProbes.length).toBe(1); expect(f.walletCalls).toEqual([]);
+  await f.openQr(); await expect(page.locator("#wallet-login")).toBeEnabled();
+  await expect.poll(() => f.cleanups.length).toBe(1); await f.approveQr(); await expect(page.locator(".wallet-dialog")).not.toBeVisible();
+  await f.beginSignature(0); f.peerProbes[0]!.reply.reject(Error("There is no existing session matching the topic"));
+  f.cleanups[0]!.done.resolve(); await page.waitForTimeout(25);
+  await expect(page.locator("#wallet-login")).toBeDisabled(); await expect(page.locator(".wallet-network")).toHaveText("OKX reconnect fixture · Arc Mainnet");
+  await f.approveSignature(0); await expect(page.locator("#connection-status")).toContainText("Connected ·");
+  expect(f.walletCalls.map(row => row.method)).toEqual(["personal_sign"]); expect(f.cleanups).toHaveLength(1);
+  expect(f.requests.filter(row => row.path.endsWith("/verify"))).toHaveLength(1); await f.assertNoReloadOrPayment();
+});
 
 test("Reconnect via QR cancels a stale sign-in before timeout and ignores the old signature and cleanup", async ({ page }) => {
   const f = await reconnectFixture(page); await f.beginSignature(0); await f.openQr();
