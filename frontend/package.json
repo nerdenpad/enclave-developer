@@ -16,7 +16,9 @@
     "test:motion": "playwright test --config playwright.motion.config.ts"
   },
   "overrides": {
-    "rolldown": "1.2.1"
+    "rolldown": "1.2.1",
+    "source-map-js": "1.2.2",
+    "shell-quote": "1.11.0"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

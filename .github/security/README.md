@@ -33,6 +33,8 @@ The [invariant coverage map](invariants.md) links economic, replay, registry, du
 
 Existing CI Actions are pinned to full official commit SHAs. Foundry stays at 1.8.1; its Docker fallback includes an immutable image digest. Gitleaks and solc downloads are verified against the hashes in [tool-pins.json](tool-pins.json). [requirements-linux.lock](requirements-linux.lock) pins all scanner dependencies and wheel hashes for Linux x86_64, Python 3.12.10 or later in the 3.12 series; it does not replace the inference runtime's dependency policy.
 
+The isolated integration Compose file pins PostgreSQL 16.15, Redis 7.4.11 and Anvil/Foundry 1.8.1 to official registry index digests. Update the version and digest together after checking the supported platform manifest. A registry metadata lookup does not establish that the container integration tests ran. Application dependency updates follow the [dependency review policy](../../docs/dependency-policy.md).
+
 Update versions, hashes and rule fixtures together, review upstream release changes and run the scanner jobs before merging. Raw reports and scanner diagnostics remain in ignored `.local/security-results/`; CI publishes only count summaries. Never upload raw scanner output or unredacted findings as public artifacts.
 
 Local commands from the repository root:

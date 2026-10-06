@@ -8,7 +8,8 @@ files, access API keys, deploy workloads, or trust an upstream `PASS` string.
 
 Python 3.10+ with a platform supported by `dcap-qvl` is required. Python 3.13 on
 Windows was tested. Create an isolated environment rather than modifying system
-Python:
+Python. The following Windows recipe is for development and pins only direct
+dependencies; use the hash-locked Linux installer below for a reproducible release:
 
 ```powershell
 py -3.13 -m venv infra/near/.venv
@@ -22,6 +23,53 @@ verification needs internet access to Intel collateral/PCCS and the selected
 NVIDIA verifier's official collateral services.
 Tests are offline; their public historical fixture fixes validation time only in
 test code and exercises actual Intel and NVIDIA signature verification.
+
+### Reproducible Linux installation
+
+The [Linux dependency lock](requirements-linux.lock) pins the four direct
+dependencies and all six transitive dependencies. It accepts only the reviewed
+official PyPI wheel hashes for **Linux x86_64, glibc 2.28 or later, final CPython 3.11
+or 3.12 releases**. Debian 12's Python 3.11 and the Python 3.12 CI interpreter are within
+this scope. Other operating systems, architectures and Python versions need a
+separately reviewed lock; do not remove hash checks to install them.
+
+Prepare a new virtual environment with its own absolute path. Its parent must
+already exist; the installer refuses an existing environment and leaves a failed
+staging directory for inspection. It atomically reserves the new directory before
+creating the environment, so a concurrent creator cannot have its directory reused.
+Run from `_backend`:
+
+```sh
+python3 infra/near/install-runtime.py --venv /absolute/private/near-verifier-v1
+/absolute/private/near-verifier-v1/bin/python -m unittest discover -s infra/near -p 'test_*.py'
+```
+
+The installer validates the platform and reviewed lock before writing, downloads
+only wheels with `--require-hashes`, then installs the saved wheels without an
+index. It runs `pip check`, checks the exact installed versions and imports the
+native verifier and cryptographic libraries. It does not load deployment
+credentials, call NEAR, switch `NEAR_VERIFIER_PYTHON` or restart a service. Select
+the prepared interpreter only as part of a separately reviewed deployment.
+
+For an already isolated, supported CI interpreter:
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r infra/near/requirements-linux.lock
+python -m pip check
+```
+
+Keep `requirements.txt` as the direct-version input. When updating it, resolve
+both supported Python targets, review their complete wheel metadata, compare the
+downloaded SHA-256 with PyPI's publisher metadata and update the lock plus the
+installer's normalized lock digest together. Run hash-enforced downloads and the
+offline installer boundary tests before Linux execution. A Windows cross-target
+download or installation validates dependency resolution and wheel hashes; it
+does not execute a Linux native library or establish deployed runtime acceptance.
+
+This lock covers the Python evidence verifier. NVAT's binary/library and publisher
+distribution remain separately pinned in the reviewed provider policy. It does
+not pin a Modal GPU image, model weights, the operating system or collateral
+responses, and hash matching alone is not a vulnerability or hardware audit.
 
 ## Subprocess protocol
 

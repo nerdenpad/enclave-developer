@@ -63,6 +63,6 @@ npm test --workspace @enclave/agent-sdk
 npm test --workspace @enclave/agent-sdk -- --coverage
 ```
 
-Dependencies are pinned to `@anthropic-ai/claude-agent-sdk@0.3.278`, `@anthropic-ai/sdk@0.127.0`, `@modelcontextprotocol/sdk@1.30.0` and `zod@4.6.5`. Zod's supported v3 compatibility namespace is used for interoperability with MCP's Zod peer and the existing gateway workspace. A narrow static type bridge is used when registering the strict object schema; runtime validation is exercised through the actual MCP transport.
+Dependencies are pinned to `@anthropic-ai/claude-agent-sdk@0.3.278`, `@anthropic-ai/sdk@0.127.0`, `@modelcontextprotocol/sdk@1.31.0` and `zod@4.6.5`. Zod's supported v3 compatibility namespace is used for interoperability with MCP's Zod peer and the existing gateway workspace. A narrow static type bridge is used when registering the strict object schema; runtime validation is exercised through the actual MCP transport.
 
 Official API reference: [Claude Agent SDK custom tools](https://code.claude.com/docs/en/agent-sdk/custom-tools).

@@ -10,3 +10,14 @@ fuzz = { runs = 256 }
 
 [rpc_endpoints]
 local = "http://127.0.0.1:8545"
+
+# Keep routine test/coverage runs bounded; the named campaign explores longer histories.
+[profile.default.invariant]
+runs = 32
+depth = 64
+fail_on_revert = true
+
+[profile.stateful.invariant]
+runs = 128
+depth = 128
+fail_on_revert = true
